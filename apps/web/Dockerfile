@@ -45,6 +45,9 @@ RUN pnpm --filter @workchat/web build
 # ============================================
 FROM nginx:alpine AS runner
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Copy built assets
 COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
 
