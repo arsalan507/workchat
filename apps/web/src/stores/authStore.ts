@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { User } from '@workchat/shared'
 import { api } from '../services/api'
+import { initSocket, disconnectSocket } from '../services/socket'
 
 interface AuthState {
   user: User | null
@@ -55,11 +56,15 @@ export const useAuthStore = create<AuthState>()(
           otpExpiresIn: null,
         })
 
+        // Initialize socket connection after login
+        initSocket(accessToken)
+
         return { isNewUser }
       },
 
       logout: () => {
         api.post('/api/auth/logout').catch(() => {})
+        disconnectSocket()
         set({
           user: null,
           token: null,

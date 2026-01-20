@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../services/api'
+import { getSocket, joinChat, leaveChat } from '../../services/socket'
 import { formatMessageTime, MessageType, TaskStatus, TASK_STATUS_COLORS, ChatMemberRole } from '@workchat/shared'
 import ConvertToTaskModal from './ConvertToTaskModal'
 import TaskDetailsModal from '../task/TaskDetailsModal'
@@ -165,6 +166,72 @@ export default function ChatPanel() {
   useEffect(() => {
     inputRef.current?.focus()
   }, [chatId])
+
+  // Socket.io real-time event listeners
+  useEffect(() => {
+    if (!chatId) return
+
+    const socket = getSocket()
+    if (!socket) return
+
+    // Join the chat room
+    joinChat(chatId)
+
+    // Listen for new messages
+    const handleNewMessage = (data: { chatId: string; message: any }) => {
+      if (data.chatId === chatId) {
+        queryClient.setQueryData(['messages', chatId], (oldData: any) => {
+          if (!oldData) return oldData
+          // Check if message already exists
+          const exists = oldData.data?.some((m: any) => m.id === data.message.id)
+          if (exists) return oldData
+          return {
+            ...oldData,
+            data: [data.message, ...(oldData.data || [])],
+          }
+        })
+        // Also update chats list for last message
+        queryClient.invalidateQueries({ queryKey: ['chats'] })
+      }
+    }
+
+    // Listen for task status changes
+    const handleTaskStatusChanged = (data: { taskId: string; status: string; chatId: string }) => {
+      if (data.chatId === chatId) {
+        queryClient.invalidateQueries({ queryKey: ['messages', chatId] })
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      }
+    }
+
+    // Listen for message converted to task
+    const handleMessageConvertedToTask = (data: { messageId: string; task: any; chatId: string }) => {
+      if (data.chatId === chatId) {
+        queryClient.invalidateQueries({ queryKey: ['messages', chatId] })
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      }
+    }
+
+    // Listen for typing indicators
+    const handleUserTyping = (data: { chatId: string; userId: string; userName: string }) => {
+      if (data.chatId === chatId) {
+        // Could show typing indicator here
+        console.log(`${data.userName} is typing...`)
+      }
+    }
+
+    socket.on('new_message', handleNewMessage)
+    socket.on('task_status_changed', handleTaskStatusChanged)
+    socket.on('message_converted_to_task', handleMessageConvertedToTask)
+    socket.on('user_typing', handleUserTyping)
+
+    return () => {
+      leaveChat(chatId)
+      socket.off('new_message', handleNewMessage)
+      socket.off('task_status_changed', handleTaskStatusChanged)
+      socket.off('message_converted_to_task', handleMessageConvertedToTask)
+      socket.off('user_typing', handleUserTyping)
+    }
+  }, [chatId, queryClient])
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault()

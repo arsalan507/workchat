@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../services/api'
+import { getSocket } from '../../services/socket'
 import { formatMessageTime } from '@workchat/shared'
 import { ActiveTab } from '../../pages/MainLayout'
 import NewChatModal from '../contacts/NewChatModal'
@@ -54,6 +55,7 @@ interface SidebarProps {
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const navigate = useNavigate()
   const { chatId } = useParams<{ chatId: string }>()
+  const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const [searchQuery, setSearchQuery] = useState('')
@@ -69,6 +71,37 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       return response.data.data
     },
   })
+
+  // Socket.io listeners for chat list updates
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return
+
+    // Listen for new messages to update chat list order/preview
+    const handleNewMessage = () => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] })
+    }
+
+    // Listen for new chat created
+    const handleChatCreated = () => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] })
+    }
+
+    // Listen for chat updates
+    const handleChatUpdated = () => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] })
+    }
+
+    socket.on('new_message', handleNewMessage)
+    socket.on('chat_created', handleChatCreated)
+    socket.on('chat_updated', handleChatUpdated)
+
+    return () => {
+      socket.off('new_message', handleNewMessage)
+      socket.off('chat_created', handleChatCreated)
+      socket.off('chat_updated', handleChatUpdated)
+    }
+  }, [queryClient])
 
   const chats = chatsData || []
 

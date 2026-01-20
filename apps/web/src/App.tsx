@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
+import { initSocket } from './services/socket'
 
 // Pages
 import LoginPage from './pages/LoginPage'
@@ -7,6 +9,13 @@ import MainLayout from './pages/MainLayout'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((state) => state.token)
+
+  // Initialize socket when app loads with existing token
+  useEffect(() => {
+    if (token) {
+      initSocket(token)
+    }
+  }, [token])
 
   if (!token) {
     return <Navigate to="/login" replace />
