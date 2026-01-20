@@ -19,6 +19,9 @@ RUN pnpm install --frozen-lockfile
 # Generate Prisma client
 RUN pnpm --filter @workchat/database prisma generate
 
+# Build database package (exports prisma client)
+RUN pnpm --filter @workchat/database build
+
 # Build shared package
 RUN pnpm --filter @workchat/shared build
 
