@@ -1,12 +1,13 @@
 # WorkChat API Dockerfile
 # Single stage build for reliability with pnpm monorepo
+# Using Debian slim instead of Alpine for Prisma OpenSSL compatibility
 
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# Install wget for healthcheck and pnpm
-RUN apk add --no-cache wget
+# Install wget for healthcheck, openssl for Prisma, and enable pnpm
+RUN apt-get update && apt-get install -y --no-install-recommends wget openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
 # Copy entire workspace
