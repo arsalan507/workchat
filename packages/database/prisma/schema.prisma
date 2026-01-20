@@ -75,6 +75,7 @@ model User {
   taskProofs      TaskProof[]
   taskActivities  TaskActivity[]
   chatsCreated    Chat[]         @relation("ChatCreator")
+  refreshTokens   RefreshToken[]
 
   @@map("users")
 }
@@ -237,4 +238,25 @@ model TaskActivity {
   @@index([taskId, createdAt(sort: Desc)])
   @@index([userId])
   @@map("task_activities")
+}
+
+// ============================================
+// REFRESH TOKEN MODEL (For persistent login)
+// ============================================
+
+model RefreshToken {
+  id           String    @id @default(cuid())
+  token        String    @unique
+  userId       String    @map("user_id")
+  deviceInfo   String?   @map("device_info") // Optional: browser/device identifier
+  expiresAt    DateTime  @map("expires_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  lastUsedAt   DateTime  @default(now()) @map("last_used_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }

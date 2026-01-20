@@ -60,16 +60,47 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isInitialized: true,
       })
 
-      // Verify token is still valid
+      // If we have a token, verify it's still valid
       if (storedToken) {
         try {
           const response = await api.get('/api/auth/me')
           set({ user: response.data.data })
           await AsyncStorage.setItem('workchat-user', JSON.stringify(response.data.data))
-        } catch (error) {
-          // Token invalid - clear auth state
-          await AsyncStorage.multiRemove(['workchat-token', 'workchat-refresh-token', 'workchat-user'])
-          set({ token: null, refreshToken: null, user: null })
+        } catch (error: any) {
+          // If 401 and we have a refresh token, try to refresh
+          if (error.response?.status === 401 && storedRefreshToken) {
+            try {
+              const refreshResponse = await api.post('/api/auth/refresh', {
+                refreshToken: storedRefreshToken,
+              })
+              const { accessToken, refreshToken: newRefreshToken } = refreshResponse.data.data
+
+              // Store new tokens
+              await AsyncStorage.setItem('workchat-token', accessToken)
+              await AsyncStorage.setItem('workchat-refresh-token', newRefreshToken)
+
+              set({
+                token: accessToken,
+                refreshToken: newRefreshToken,
+              })
+
+              // Now fetch user with new token
+              const userResponse = await api.get('/api/auth/me', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              })
+              set({ user: userResponse.data.data })
+              await AsyncStorage.setItem('workchat-user', JSON.stringify(userResponse.data.data))
+            } catch (refreshError) {
+              // Refresh failed - clear auth state
+              console.log('Token refresh failed, clearing auth state')
+              await AsyncStorage.multiRemove(['workchat-token', 'workchat-refresh-token', 'workchat-user'])
+              set({ token: null, refreshToken: null, user: null })
+            }
+          } else {
+            // Other error or no refresh token - clear auth state
+            await AsyncStorage.multiRemove(['workchat-token', 'workchat-refresh-token', 'workchat-user'])
+            set({ token: null, refreshToken: null, user: null })
+          }
         }
       }
     } catch (error) {

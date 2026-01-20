@@ -4,6 +4,7 @@ import { prisma } from '@workchat/database'
 import { OTP_EXPIRY_MINUTES } from '@workchat/shared'
 import { authenticate } from '../middleware/auth'
 import { AppError, UnauthorizedError } from '../middleware/errorHandler'
+import crypto from 'crypto'
 
 // Twilio Verify Service configuration
 const TWILIO_VERIFY_SERVICE_SID = process.env.TWILIO_VERIFY_SERVICE_SID || 'VAe554aec66d9657b6f8949312fc250e96'
@@ -35,11 +36,21 @@ const refreshSchema = z.object({
   refreshToken: z.string(),
 })
 
-// Store refresh tokens (in production, use Redis)
-const refreshTokens = new Map<string, { userId: string; expiresAt: Date }>()
+// Refresh token expiry: 90 days for WhatsApp-like persistent login
+const REFRESH_TOKEN_EXPIRY_DAYS = 90
 
 // TEST MODE: Set to true to skip Twilio and use PIN 123456
 const TEST_MODE = true
+
+// Generate a secure random token
+function generateRefreshToken(): string {
+  return crypto.randomBytes(64).toString('hex')
+}
+
+// Calculate expiry date
+function getRefreshTokenExpiry(): Date {
+  return new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
+}
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
   /**
@@ -159,22 +170,27 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     })
 
-    // Generate tokens (no role in JWT anymore)
+    // Generate access token (short-lived: 15 minutes)
     const accessToken = fastify.jwt.sign({
       id: updatedUser.id,
       phone: updatedUser.phone,
       name: updatedUser.name,
     })
 
-    const refreshToken = fastify.jwt.sign(
-      { id: updatedUser.id, type: 'refresh' },
-      { expiresIn: '7d' }
-    )
+    // Generate and store refresh token in database (long-lived: 90 days)
+    const refreshToken = generateRefreshToken()
+    const expiresAt = getRefreshTokenExpiry()
 
-    // Store refresh token
-    refreshTokens.set(refreshToken, {
-      userId: updatedUser.id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    // Get device info from user agent
+    const deviceInfo = request.headers['user-agent'] || 'Unknown device'
+
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: updatedUser.id,
+        deviceInfo,
+        expiresAt,
+      },
     })
 
     // Set refresh token as httpOnly cookie
@@ -183,7 +199,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/api/auth',
-      maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
+      maxAge: REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60, // 90 days in seconds
     })
 
     return {
@@ -211,40 +227,42 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const body = refreshSchema.parse(request.body)
     const { refreshToken } = body
 
-    // Check if refresh token exists
-    const tokenData = refreshTokens.get(refreshToken)
-    if (!tokenData || tokenData.expiresAt < new Date()) {
-      refreshTokens.delete(refreshToken)
+    // Find refresh token in database
+    const tokenRecord = await prisma.refreshToken.findUnique({
+      where: { token: refreshToken },
+      include: { user: true },
+    })
+
+    // Check if token exists and is not expired
+    if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
+      // Delete expired token if exists
+      if (tokenRecord) {
+        await prisma.refreshToken.delete({ where: { id: tokenRecord.id } })
+      }
       throw new UnauthorizedError('Invalid or expired refresh token')
     }
 
-    // Get user
-    const user = await prisma.user.findUnique({
-      where: { id: tokenData.userId },
-    })
+    const user = tokenRecord.user
 
-    if (!user) {
-      refreshTokens.delete(refreshToken)
-      throw new UnauthorizedError('User not found')
-    }
-
-    // Generate new tokens
+    // Generate new access token
     const newAccessToken = fastify.jwt.sign({
       id: user.id,
       phone: user.phone,
       name: user.name,
     })
 
-    const newRefreshToken = fastify.jwt.sign(
-      { id: user.id, type: 'refresh' },
-      { expiresIn: '7d' }
-    )
+    // Generate new refresh token (token rotation for security)
+    const newRefreshToken = generateRefreshToken()
+    const newExpiresAt = getRefreshTokenExpiry()
 
-    // Replace old refresh token
-    refreshTokens.delete(refreshToken)
-    refreshTokens.set(newRefreshToken, {
-      userId: user.id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    // Update refresh token in database (rotate token)
+    await prisma.refreshToken.update({
+      where: { id: tokenRecord.id },
+      data: {
+        token: newRefreshToken,
+        expiresAt: newExpiresAt,
+        lastUsedAt: new Date(),
+      },
     })
 
     reply.setCookie('refreshToken', newRefreshToken, {
@@ -252,7 +270,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/api/auth',
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
     })
 
     return {
@@ -270,9 +288,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/logout', {
     preHandler: [authenticate],
   }, async (request, reply) => {
-    const refreshToken = request.cookies.refreshToken
+    // Try to get refresh token from cookie or body
+    const refreshToken = request.cookies.refreshToken || (request.body as any)?.refreshToken
+
     if (refreshToken) {
-      refreshTokens.delete(refreshToken)
+      // Delete the refresh token from database
+      await prisma.refreshToken.deleteMany({
+        where: { token: refreshToken },
+      })
     }
 
     reply.clearCookie('refreshToken', { path: '/api/auth' })
@@ -309,4 +332,21 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     }
   })
+
+  /**
+   * Cleanup expired tokens (can be called periodically)
+   */
+  const cleanupExpiredTokens = async () => {
+    await prisma.refreshToken.deleteMany({
+      where: {
+        expiresAt: { lt: new Date() },
+      },
+    })
+  }
+
+  // Run cleanup on server start and every 24 hours
+  cleanupExpiredTokens().catch((err) => fastify.log.error('Failed to cleanup tokens:', err))
+  setInterval(() => {
+    cleanupExpiredTokens().catch((err) => fastify.log.error('Failed to cleanup tokens:', err))
+  }, 24 * 60 * 60 * 1000)
 }
