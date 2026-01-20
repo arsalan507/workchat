@@ -1,0 +1,234 @@
+// WorkChat Database Schema
+// A WhatsApp-style internal task execution system
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+}
+
+enum ChatType {
+  DIRECT
+  GROUP
+}
+
+enum MessageType {
+  TEXT
+  AUDIO
+  IMAGE
+  VIDEO
+  FILE
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  APPROVED
+  REOPENED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ============================================
+// USER MODEL
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  password  String
+  name      String
+  avatarUrl String?  @map("avatar_url")
+  role      UserRole @default(STAFF)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  chatMemberships ChatMember[]
+  messagesSent    Message[]
+  tasksOwned      Task[]         @relation("TaskOwner")
+  tasksCreated    Task[]         @relation("TaskCreator")
+  taskProofs      TaskProof[]
+  taskActivities  TaskActivity[]
+  chatsCreated    Chat[]         @relation("ChatCreator")
+
+  @@map("users")
+}
+
+// ============================================
+// CHAT MODELS
+// ============================================
+
+model Chat {
+  id        String   @id @default(cuid())
+  type      ChatType @default(GROUP)
+  name      String
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  creator  User         @relation("ChatCreator", fields: [createdBy], references: [id])
+  members  ChatMember[]
+  messages Message[]
+
+  @@index([createdBy])
+  @@index([updatedAt(sort: Desc)])
+  @@map("chats")
+}
+
+model ChatMember {
+  chatId   String   @map("chat_id")
+  userId   String   @map("user_id")
+  role     String   @default("MEMBER") // OWNER or MEMBER
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  // Relations
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId])
+  @@map("chat_members")
+}
+
+// ============================================
+// MESSAGE MODEL
+// ============================================
+
+model Message {
+  id        String      @id @default(cuid())
+  chatId    String      @map("chat_id")
+  senderId  String      @map("sender_id")
+  content   String?
+  type      MessageType @default(TEXT)
+  fileUrl   String?     @map("file_url")
+  replyToId String?     @map("reply_to_id")
+  isTask    Boolean     @default(false) @map("is_task")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  chat    Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender  User      @relation(fields: [senderId], references: [id])
+  replyTo Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies Message[] @relation("MessageReplies")
+  task    Task?
+
+  @@index([chatId, createdAt(sort: Desc)])
+  @@index([senderId])
+  @@index([isTask])
+  @@map("messages")
+}
+
+// ============================================
+// TASK MODELS
+// ============================================
+
+model Task {
+  id               String       @id @default(cuid())
+  messageId        String       @unique @map("message_id")
+  title            String
+  ownerId          String       @map("owner_id")
+  status           TaskStatus   @default(PENDING)
+  priority         TaskPriority @default(MEDIUM)
+  dueDate          DateTime?    @map("due_date")
+  isRecurring      Boolean      @default(false) @map("is_recurring")
+  recurringRule    String?      @map("recurring_rule")
+  approvalRequired Boolean      @default(true) @map("approval_required")
+  createdById      String       @map("created_by_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  completedAt      DateTime?    @map("completed_at")
+  approvedAt       DateTime?    @map("approved_at")
+
+  // Relations
+  message    Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  owner      User           @relation("TaskOwner", fields: [ownerId], references: [id])
+  createdBy  User           @relation("TaskCreator", fields: [createdById], references: [id])
+  steps      TaskStep[]
+  proofs     TaskProof[]
+  activities TaskActivity[]
+
+  @@index([ownerId, status])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdById])
+  @@map("tasks")
+}
+
+model TaskStep {
+  id            String    @id @default(cuid())
+  taskId        String    @map("task_id")
+  order         Int
+  content       String
+  isMandatory   Boolean   @default(true) @map("is_mandatory")
+  proofRequired Boolean   @default(false) @map("proof_required")
+  completedAt   DateTime? @map("completed_at")
+  completedById String?   @map("completed_by_id")
+
+  // Relations
+  task   Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  proofs TaskProof[]
+
+  @@unique([taskId, order])
+  @@index([taskId])
+  @@map("task_steps")
+}
+
+model TaskProof {
+  id        String      @id @default(cuid())
+  taskId    String      @map("task_id")
+  stepId    String?     @map("step_id")
+  userId    String      @map("user_id")
+  type      MessageType
+  url       String
+  note      String?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  task Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step TaskStep? @relation(fields: [stepId], references: [id])
+  user User      @relation(fields: [userId], references: [id])
+
+  @@index([taskId])
+  @@index([stepId])
+  @@index([userId])
+  @@map("task_proofs")
+}
+
+model TaskActivity {
+  id        String   @id @default(cuid())
+  taskId    String   @map("task_id")
+  userId    String   @map("user_id")
+  action    String   // STATUS_CHANGED, STEP_COMPLETED, PROOF_UPLOADED, etc.
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([taskId, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("task_activities")
+}
