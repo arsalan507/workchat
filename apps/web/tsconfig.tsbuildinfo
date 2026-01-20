@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/chat/chatpanel.tsx","./src/components/chat/emptychat.tsx","./src/components/layout/sidebar.tsx","./src/components/tasks/taskspanel.tsx","./src/pages/chatpage.tsx","./src/pages/homepage.tsx","./src/pages/loginpage.tsx","./src/pages/mainlayout.tsx","./src/services/api.ts","./src/stores/authstore.ts"],"version":"5.9.3"}

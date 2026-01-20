@@ -13,7 +13,6 @@ import { userRoutes } from './routes/users'
 import { chatRoutes } from './routes/chats'
 import { messageRoutes } from './routes/messages'
 import { taskRoutes } from './routes/tasks'
-import { adminRoutes } from './routes/admin'
 import { uploadRoutes } from './routes/upload'
 import { setupSocketHandlers } from './socket'
 import { errorHandler } from './middleware/errorHandler'
@@ -71,9 +70,8 @@ async function buildServer() {
   await fastify.register(authRoutes, { prefix: '/api/auth' })
   await fastify.register(userRoutes, { prefix: '/api/users' })
   await fastify.register(chatRoutes, { prefix: '/api/chats' })
-  await fastify.register(messageRoutes, { prefix: '/api/messages' })
+  await fastify.register(messageRoutes, { prefix: '/api' })  // Routes already have /chats/:id/messages paths
   await fastify.register(taskRoutes, { prefix: '/api/tasks' })
-  await fastify.register(adminRoutes, { prefix: '/api/admin' })
   await fastify.register(uploadRoutes, { prefix: '/api/upload' })
 
   return fastify

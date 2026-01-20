@@ -1,4 +1,4 @@
-import { TaskStatus, UserRole } from '../types'
+import { TaskStatus, ChatMemberRole } from '../types'
 
 // ============================================
 // TASK STATUS COLORS
@@ -35,55 +35,62 @@ export const ALLOWED_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 }
 
 // ============================================
-// PERMISSIONS BY ROLE
+// GROUP PERMISSIONS (WhatsApp-style)
 // ============================================
 
-export type Permission =
-  | 'create_users'
-  | 'create_admins'
-  | 'create_chat'
-  | 'send_message'
-  | 'convert_to_task'
-  | 'assign_owner'
-  | 'complete_own_task'
+export type GroupPermission =
+  | 'add_members'
+  | 'remove_members'
+  | 'promote_to_admin'
+  | 'demote_admin'
+  | 'edit_group_info'
+  | 'create_tasks'
+  | 'assign_task_owner'
   | 'approve_task'
   | 'reopen_task'
-  | 'view_summary'
-  | 'view_all_chats'
-  | 'manage_sops'
+  | 'send_message'
+  | 'complete_own_task'
+  | 'view_group_summary'
 
-export const PERMISSIONS: Record<UserRole, Permission[]> = {
-  [UserRole.SUPER_ADMIN]: [
-    'create_users',
-    'create_admins',
-    'create_chat',
-    'send_message',
-    'convert_to_task',
-    'assign_owner',
-    'complete_own_task',
+export const GROUP_PERMISSIONS: Record<ChatMemberRole, GroupPermission[]> = {
+  [ChatMemberRole.OWNER]: [
+    'add_members',
+    'remove_members',
+    'promote_to_admin',
+    'demote_admin',
+    'edit_group_info',
+    'create_tasks',
+    'assign_task_owner',
     'approve_task',
     'reopen_task',
-    'view_summary',
-    'view_all_chats',
-    'manage_sops',
-  ],
-  [UserRole.ADMIN]: [
-    'create_users',
-    'create_chat',
     'send_message',
-    'convert_to_task',
-    'assign_owner',
     'complete_own_task',
+    'view_group_summary',
+  ],
+  [ChatMemberRole.ADMIN]: [
+    'add_members',
+    'remove_members',
+    'edit_group_info',
+    'create_tasks',
+    'assign_task_owner',
     'approve_task',
     'reopen_task',
-    'view_summary',
-    'view_all_chats',
+    'send_message',
+    'complete_own_task',
+    'view_group_summary',
   ],
-  [UserRole.STAFF]: [
+  [ChatMemberRole.MEMBER]: [
     'send_message',
     'complete_own_task',
   ],
 }
+
+// ============================================
+// OTP CONSTANTS
+// ============================================
+
+export const OTP_LENGTH = 6
+export const OTP_EXPIRY_MINUTES = 5
 
 // ============================================
 // APP CONSTANTS

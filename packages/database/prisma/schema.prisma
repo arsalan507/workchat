@@ -1,5 +1,5 @@
 // WorkChat Database Schema
-// A WhatsApp-style internal task execution system
+// A WhatsApp-style chat application with group-based permissions
 
 generator client {
   provider = "prisma-client-js"
@@ -14,10 +14,11 @@ datasource db {
 // ENUMS
 // ============================================
 
-enum UserRole {
-  SUPER_ADMIN
-  ADMIN
-  STAFF
+// Group member roles (WhatsApp-style)
+enum ChatMemberRole {
+  OWNER  // Group creator - full control
+  ADMIN  // Promoted by owner - can manage members
+  MEMBER // Regular member
 }
 
 enum ChatType {
@@ -53,14 +54,18 @@ enum TaskPriority {
 // ============================================
 
 model User {
-  id        String   @id @default(cuid())
-  phone     String   @unique
-  password  String
-  name      String
-  avatarUrl String?  @map("avatar_url")
-  role      UserRole @default(STAFF)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String    @id @default(cuid())
+  phone        String    @unique
+  name         String
+  avatarUrl    String?   @map("avatar_url")
+
+  // OTP authentication
+  otpCode      String?   @map("otp_code")
+  otpExpiresAt DateTime? @map("otp_expires_at")
+  isVerified   Boolean   @default(false) @map("is_verified")
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   // Relations
   chatMemberships ChatMember[]
@@ -97,10 +102,10 @@ model Chat {
 }
 
 model ChatMember {
-  chatId   String   @map("chat_id")
-  userId   String   @map("user_id")
-  role     String   @default("MEMBER") // OWNER or MEMBER
-  joinedAt DateTime @default(now()) @map("joined_at")
+  chatId   String         @map("chat_id")
+  userId   String         @map("user_id")
+  role     ChatMemberRole @default(MEMBER)
+  joinedAt DateTime       @default(now()) @map("joined_at")
 
   // Relations
   chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
@@ -108,6 +113,7 @@ model ChatMember {
 
   @@id([chatId, userId])
   @@index([userId])
+  @@index([role])
   @@map("chat_members")
 }
 

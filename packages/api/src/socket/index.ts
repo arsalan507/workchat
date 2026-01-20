@@ -1,14 +1,12 @@
 import { Server as SocketServer, Socket } from 'socket.io'
 import { FastifyInstance } from 'fastify'
 import { prisma } from '@workchat/database'
-import { UserRole } from '@workchat/shared'
 
 interface AuthenticatedSocket extends Socket {
   user?: {
     id: string
     phone: string
     name: string
-    role: UserRole
   }
 }
 
@@ -28,7 +26,6 @@ export function setupSocketHandlers(io: SocketServer, fastify: FastifyInstance) 
         id: string
         phone: string
         name: string
-        role: UserRole
       }>(token)
 
       socket.user = decoded
@@ -123,7 +120,6 @@ export function setupSocketHandlers(io: SocketServer, fastify: FastifyInstance) 
                 phone: true,
                 name: true,
                 avatarUrl: true,
-                role: true,
               },
             },
             replyTo: {

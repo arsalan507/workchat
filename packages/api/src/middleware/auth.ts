@@ -1,16 +1,36 @@
 import { FastifyReply, FastifyRequest } from 'fastify'
-import { UserRole } from '@workchat/shared'
+import { Server as SocketServer } from 'socket.io'
+import { ChatMemberRole, GroupPermission, hasGroupPermission } from '@workchat/shared'
 import { ForbiddenError, UnauthorizedError } from './errorHandler'
+import { prisma } from '@workchat/database'
 
-// Extend FastifyRequest to include user
+// Define user payload type (no role in JWT anymore)
+export interface JWTPayload {
+  id: string
+  phone?: string
+  name?: string
+  type?: 'refresh'
+}
+
+// User type is the verified user object from access tokens
+export interface JWTUser {
+  id: string
+  phone: string
+  name: string
+}
+
+// Extend @fastify/jwt to define our user type
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: JWTPayload
+    user: JWTUser
+  }
+}
+
+// Extend Fastify to add socket.io
 declare module 'fastify' {
-  interface FastifyRequest {
-    user: {
-      id: string
-      phone: string
-      name: string
-      role: UserRole
-    }
+  interface FastifyInstance {
+    io: SocketServer
   }
 }
 
@@ -26,7 +46,6 @@ export async function authenticate(
       id: string
       phone: string
       name: string
-      role: UserRole
     }>()
     request.user = decoded
   } catch (err) {
@@ -35,48 +54,100 @@ export async function authenticate(
 }
 
 /**
- * Middleware factory to check if user has required role
+ * Get a user's role in a specific chat
  */
-export function authorize(allowedRoles: UserRole[]) {
+export async function getChatMemberRole(
+  userId: string,
+  chatId: string
+): Promise<ChatMemberRole | null> {
+  const member = await prisma.chatMember.findUnique({
+    where: {
+      chatId_userId: {
+        chatId,
+        userId,
+      },
+    },
+  })
+  return member?.role as ChatMemberRole | null
+}
+
+/**
+ * Middleware to check if user is a member of the chat
+ * Attaches memberRole to request for use in subsequent handlers
+ */
+export function requireChatMember(chatIdParam: string = 'chatId') {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
       throw new UnauthorizedError('Authentication required')
     }
 
-    if (!allowedRoles.includes(request.user.role)) {
-      throw new ForbiddenError('You do not have permission to perform this action')
+    const chatId = (request.params as Record<string, string>)[chatIdParam]
+    if (!chatId) {
+      throw new ForbiddenError('Chat ID is required')
+    }
+
+    const memberRole = await getChatMemberRole(request.user.id, chatId)
+    if (!memberRole) {
+      throw new ForbiddenError('You are not a member of this chat')
+    }
+
+    // Attach memberRole to request for use in handlers
+    ;(request as any).memberRole = memberRole
+  }
+}
+
+/**
+ * Middleware factory to check if user has required group permission
+ * Must be used after requireChatMember
+ */
+export function requireGroupPermission(permission: GroupPermission) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const memberRole = (request as any).memberRole as ChatMemberRole | undefined
+
+    if (!memberRole) {
+      throw new ForbiddenError('Chat membership not verified')
+    }
+
+    if (!hasGroupPermission(memberRole, permission)) {
+      throw new ForbiddenError(`You do not have permission to ${permission.replace(/_/g, ' ')}`)
     }
   }
 }
 
 /**
- * Middleware to check if user is admin or super admin
+ * Middleware to check if user is group admin (OWNER or ADMIN)
+ * Must be used after requireChatMember
  */
-export async function requireAdmin(
+export async function requireGroupAdmin(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  if (!request.user) {
-    throw new UnauthorizedError('Authentication required')
+  const memberRole = (request as any).memberRole as ChatMemberRole | undefined
+
+  if (!memberRole) {
+    throw new ForbiddenError('Chat membership not verified')
   }
 
-  if (request.user.role !== UserRole.ADMIN && request.user.role !== UserRole.SUPER_ADMIN) {
-    throw new ForbiddenError('Admin access required')
+  if (memberRole !== ChatMemberRole.OWNER && memberRole !== ChatMemberRole.ADMIN) {
+    throw new ForbiddenError('Group admin access required')
   }
 }
 
 /**
- * Middleware to check if user is super admin
+ * Middleware to check if user is group owner
+ * Must be used after requireChatMember
  */
-export async function requireSuperAdmin(
+export async function requireGroupOwner(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  if (!request.user) {
-    throw new UnauthorizedError('Authentication required')
+  const memberRole = (request as any).memberRole as ChatMemberRole | undefined
+
+  if (!memberRole) {
+    throw new ForbiddenError('Chat membership not verified')
   }
 
-  if (request.user.role !== UserRole.SUPER_ADMIN) {
-    throw new ForbiddenError('Super Admin access required')
+  if (memberRole !== ChatMemberRole.OWNER) {
+    throw new ForbiddenError('Group owner access required')
   }
 }

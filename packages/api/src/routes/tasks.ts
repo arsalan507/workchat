@@ -1,17 +1,9 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '@workchat/database'
-import { TaskStatus, TaskPriority, UserRole, canTransitionTo, isOverdue } from '@workchat/shared'
-import { authenticate, requireAdmin } from '../middleware/auth'
+import { TaskStatus, ChatMemberRole, canTransitionTo, isOverdue } from '@workchat/shared'
+import { authenticate, getChatMemberRole } from '../middleware/auth'
 import { NotFoundError, ForbiddenError, ValidationError } from '../middleware/errorHandler'
-import { Server as SocketServer } from 'socket.io'
-
-// Extend Fastify to include socket.io
-declare module 'fastify' {
-  interface FastifyInstance {
-    io: SocketServer
-  }
-}
 
 // Validation schemas
 const taskIdParamsSchema = z.object({
@@ -43,30 +35,46 @@ const uploadProofSchema = z.object({
 
 export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   /**
-   * GET /api/tasks - List tasks (filtered)
+   * GET /api/tasks - List tasks (filtered by chat membership)
+   * Users can see tasks in chats they are members of
    */
   fastify.get('/', {
     preHandler: [authenticate],
   }, async (request) => {
     const filters = taskFilterSchema.parse(request.query)
     const userId = request.user.id
-    const isAdmin = request.user.role === UserRole.ADMIN || request.user.role === UserRole.SUPER_ADMIN
+
+    // Get all chats user is a member of
+    const userChats = await prisma.chatMember.findMany({
+      where: { userId },
+      select: { chatId: true, role: true },
+    })
+
+    const chatIds = userChats.map((c) => c.chatId)
 
     // Build where clause
-    const where: any = {}
+    const where: any = {
+      message: {
+        chatId: { in: chatIds },
+      },
+    }
 
     if (filters.status) {
       where.status = filters.status
     }
 
     if (filters.chatId) {
-      where.message = { chatId: filters.chatId }
+      // Verify user is member of specified chat
+      if (!chatIds.includes(filters.chatId)) {
+        return {
+          success: true,
+          data: [],
+        }
+      }
+      where.message.chatId = filters.chatId
     }
 
-    // Staff can only see their own tasks
-    if (!isAdmin) {
-      where.ownerId = userId
-    } else if (filters.ownerId) {
+    if (filters.ownerId) {
       where.ownerId = filters.ownerId
     }
 
@@ -151,6 +159,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     preHandler: [authenticate],
   }, async (request) => {
     const { id } = taskIdParamsSchema.parse(request.params)
+    const userId = request.user.id
 
     const task = await prisma.task.findUnique({
       where: { id },
@@ -161,7 +170,6 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             phone: true,
             name: true,
             avatarUrl: true,
-            role: true,
           },
         },
         createdBy: {
@@ -209,6 +217,12 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       throw new NotFoundError('Task')
     }
 
+    // Check if user is a member of the chat
+    const memberRole = await getChatMemberRole(userId, task.message.chatId)
+    if (!memberRole) {
+      throw new ForbiddenError('You are not a member of this chat')
+    }
+
     return {
       success: true,
       data: {
@@ -242,6 +256,9 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * PATCH /api/tasks/:id/status - Update task status
+   * - IN_PROGRESS: owner can set
+   * - COMPLETED: owner can set (after completing mandatory steps)
+   * - APPROVED/REOPENED: group admin (OWNER/ADMIN) can set
    */
   fastify.patch('/:id/status', {
     preHandler: [authenticate],
@@ -249,8 +266,6 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = taskIdParamsSchema.parse(request.params)
     const { status: newStatus } = updateStatusSchema.parse(request.body)
     const userId = request.user.id
-    const userRole = request.user.role
-    const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN
 
     const task = await prisma.task.findUnique({
       where: { id },
@@ -264,26 +279,32 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       throw new NotFoundError('Task')
     }
 
-    // Check permission
-    const isOwner = task.ownerId === userId
+    // Get user's role in the chat
+    const memberRole = await getChatMemberRole(userId, task.message.chatId)
+    if (!memberRole) {
+      throw new ForbiddenError('You are not a member of this chat')
+    }
 
-    // COMPLETED can only be set by owner
+    const isOwner = task.ownerId === userId
+    const isGroupAdmin = memberRole === ChatMemberRole.OWNER || memberRole === ChatMemberRole.ADMIN
+
+    // COMPLETED can only be set by task owner
     if (newStatus === TaskStatus.COMPLETED && !isOwner) {
       throw new ForbiddenError('Only the task owner can mark it as completed')
     }
 
-    // APPROVED and REOPENED can only be set by admin
-    if ((newStatus === TaskStatus.APPROVED || newStatus === TaskStatus.REOPENED) && !isAdmin) {
-      throw new ForbiddenError('Only admins can approve or reopen tasks')
+    // APPROVED and REOPENED can only be set by group admin
+    if ((newStatus === TaskStatus.APPROVED || newStatus === TaskStatus.REOPENED) && !isGroupAdmin) {
+      throw new ForbiddenError('Only group admins can approve or reopen tasks')
     }
 
-    // IN_PROGRESS can be set by owner or admin
-    if (newStatus === TaskStatus.IN_PROGRESS && !isOwner && !isAdmin) {
+    // IN_PROGRESS can be set by task owner or group admin
+    if (newStatus === TaskStatus.IN_PROGRESS && !isOwner && !isGroupAdmin) {
       throw new ForbiddenError('You do not have permission to update this task')
     }
 
     // Check if transition is allowed
-    if (!canTransitionTo(task.status, newStatus)) {
+    if (!canTransitionTo(task.status as TaskStatus, newStatus)) {
       throw new ValidationError(
         `Cannot transition from ${task.status} to ${newStatus}`
       )
@@ -420,6 +441,12 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       throw new NotFoundError('Task')
     }
 
+    // Verify user is member of chat
+    const memberRole = await getChatMemberRole(userId, task.message.chatId)
+    if (!memberRole) {
+      throw new ForbiddenError('You are not a member of this chat')
+    }
+
     // Create proof
     const proof = await prisma.taskProof.create({
       data: {
@@ -457,37 +484,167 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   })
 
   /**
-   * POST /api/tasks/:id/approve - Approve a completed task (Admin only)
+   * POST /api/tasks/:id/approve - Approve a completed task (group admin only)
    */
   fastify.post('/:id/approve', {
-    preHandler: [authenticate, requireAdmin],
+    preHandler: [authenticate],
   }, async (request) => {
     const { id } = taskIdParamsSchema.parse(request.params)
+    const userId = request.user.id
 
-    // Use the status update logic
-    request.body = { status: TaskStatus.APPROVED }
-    return fastify.inject({
-      method: 'PATCH',
-      url: `/api/tasks/${id}/status`,
-      headers: request.headers,
-      payload: { status: TaskStatus.APPROVED },
+    const task = await prisma.task.findUnique({
+      where: { id },
+      include: {
+        message: { select: { chatId: true } },
+        steps: true,
+      },
     })
+
+    if (!task) {
+      throw new NotFoundError('Task')
+    }
+
+    // Check if user is group admin
+    const memberRole = await getChatMemberRole(userId, task.message.chatId)
+    if (!memberRole || (memberRole !== ChatMemberRole.OWNER && memberRole !== ChatMemberRole.ADMIN)) {
+      throw new ForbiddenError('Only group admins can approve tasks')
+    }
+
+    // Check if task is completed
+    if (task.status !== TaskStatus.COMPLETED) {
+      throw new ValidationError('Can only approve completed tasks')
+    }
+
+    // Update task
+    const updatedTask = await prisma.$transaction(async (tx) => {
+      const updated = await tx.task.update({
+        where: { id },
+        data: {
+          status: TaskStatus.APPROVED,
+          approvedAt: new Date(),
+        },
+        include: {
+          owner: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+          steps: { orderBy: { order: 'asc' } },
+        },
+      })
+
+      // Create activity
+      await tx.taskActivity.create({
+        data: {
+          taskId: id,
+          userId,
+          action: 'APPROVED',
+          details: { from: task.status, to: TaskStatus.APPROVED },
+        },
+      })
+
+      return updated
+    })
+
+    // Emit socket event
+    fastify.io.to(`chat:${task.message.chatId}`).emit('task_status_changed', {
+      chatId: task.message.chatId,
+      task: {
+        id: updatedTask.id,
+        messageId: updatedTask.messageId,
+        status: updatedTask.status,
+        completedAt: updatedTask.completedAt,
+        approvedAt: updatedTask.approvedAt,
+      },
+    })
+
+    return {
+      success: true,
+      data: updatedTask,
+    }
   })
 
   /**
-   * POST /api/tasks/:id/reopen - Reopen a task (Admin only)
+   * POST /api/tasks/:id/reopen - Reopen a task (group admin only)
    */
   fastify.post('/:id/reopen', {
-    preHandler: [authenticate, requireAdmin],
+    preHandler: [authenticate],
   }, async (request) => {
     const { id } = taskIdParamsSchema.parse(request.params)
+    const userId = request.user.id
 
-    request.body = { status: TaskStatus.REOPENED }
-    return fastify.inject({
-      method: 'PATCH',
-      url: `/api/tasks/${id}/status`,
-      headers: request.headers,
-      payload: { status: TaskStatus.REOPENED },
+    const task = await prisma.task.findUnique({
+      where: { id },
+      include: {
+        message: { select: { chatId: true } },
+      },
     })
+
+    if (!task) {
+      throw new NotFoundError('Task')
+    }
+
+    // Check if user is group admin
+    const memberRole = await getChatMemberRole(userId, task.message.chatId)
+    if (!memberRole || (memberRole !== ChatMemberRole.OWNER && memberRole !== ChatMemberRole.ADMIN)) {
+      throw new ForbiddenError('Only group admins can reopen tasks')
+    }
+
+    // Check if task is completed
+    if (task.status !== TaskStatus.COMPLETED) {
+      throw new ValidationError('Can only reopen completed tasks')
+    }
+
+    // Update task
+    const updatedTask = await prisma.$transaction(async (tx) => {
+      const updated = await tx.task.update({
+        where: { id },
+        data: {
+          status: TaskStatus.REOPENED,
+          completedAt: null,
+        },
+        include: {
+          owner: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+          steps: { orderBy: { order: 'asc' } },
+        },
+      })
+
+      // Create activity
+      await tx.taskActivity.create({
+        data: {
+          taskId: id,
+          userId,
+          action: 'REOPENED',
+          details: { from: task.status, to: TaskStatus.REOPENED },
+        },
+      })
+
+      return updated
+    })
+
+    // Emit socket event
+    fastify.io.to(`chat:${task.message.chatId}`).emit('task_status_changed', {
+      chatId: task.message.chatId,
+      task: {
+        id: updatedTask.id,
+        messageId: updatedTask.messageId,
+        status: updatedTask.status,
+        completedAt: updatedTask.completedAt,
+        approvedAt: updatedTask.approvedAt,
+      },
+    })
+
+    return {
+      success: true,
+      data: updatedTask,
+    }
   })
 }

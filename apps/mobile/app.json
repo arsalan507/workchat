@@ -41,6 +41,8 @@
       "expo-document-picker"
     ],
     "extra": {
+      "apiUrl": "http://localhost:3000",
+      "wsUrl": "ws://localhost:3000",
       "eas": {
         "projectId": "your-project-id"
       }

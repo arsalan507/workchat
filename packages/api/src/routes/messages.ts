@@ -1,17 +1,9 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '@workchat/database'
-import { MessageType, TaskPriority, TaskStatus, canTransitionTo } from '@workchat/shared'
-import { authenticate, requireAdmin } from '../middleware/auth'
+import { MessageType, TaskPriority, ChatMemberRole } from '@workchat/shared'
+import { authenticate, getChatMemberRole } from '../middleware/auth'
 import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '../middleware/errorHandler'
-import { Server as SocketServer } from 'socket.io'
-
-// Extend Fastify to include socket.io
-declare module 'fastify' {
-  interface FastifyInstance {
-    io: SocketServer
-  }
-}
 
 // Validation schemas
 const chatIdParamsSchema = z.object({
@@ -87,7 +79,6 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
             phone: true,
             name: true,
             avatarUrl: true,
-            role: true,
           },
         },
         replyTo: {
@@ -140,7 +131,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
         createdAt: msg.createdAt,
       })),
       meta: {
-        cursor: data.length > 0 ? data[data.length - 1].createdAt.toISOString() : null,
+        cursor: data.length > 0 ? data[data.length - 1]!.createdAt.toISOString() : null,
         hasMore,
       },
     }
@@ -184,7 +175,6 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
             phone: true,
             name: true,
             avatarUrl: true,
-            role: true,
           },
         },
         replyTo: {
@@ -246,10 +236,11 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
   })
 
   /**
-   * POST /api/messages/:id/convert-to-task - Convert a message to a task (Admin only)
+   * POST /api/messages/:id/convert-to-task - Convert a message to a task (Group Admin only)
+   * Only OWNER or ADMIN of the chat can create tasks
    */
-  fastify.post('/:id/convert-to-task', {
-    preHandler: [authenticate, requireAdmin],
+  fastify.post('/messages/:id/convert-to-task', {
+    preHandler: [authenticate],
   }, async (request) => {
     const { id: messageId } = messageIdParamsSchema.parse(request.params)
     const body = convertToTaskSchema.parse(request.body)
@@ -269,6 +260,12 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
 
     if (!message) {
       throw new NotFoundError('Message')
+    }
+
+    // Check if user is a group admin (OWNER or ADMIN) for this chat
+    const memberRole = await getChatMemberRole(userId, message.chatId)
+    if (!memberRole || (memberRole !== ChatMemberRole.OWNER && memberRole !== ChatMemberRole.ADMIN)) {
+      throw new ForbiddenError('Only group admins can convert messages to tasks')
     }
 
     // Check if already a task

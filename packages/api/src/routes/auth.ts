@@ -1,22 +1,34 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
-import { hash, compare } from 'bcrypt'
 import { prisma } from '@workchat/database'
-import { UserRole } from '@workchat/shared'
-import { authenticate, requireAdmin } from '../middleware/auth'
-import { AppError, ConflictError, UnauthorizedError } from '../middleware/errorHandler'
+import { OTP_EXPIRY_MINUTES } from '@workchat/shared'
+import { authenticate } from '../middleware/auth'
+import { AppError, UnauthorizedError } from '../middleware/errorHandler'
+
+// Twilio Verify Service configuration
+const TWILIO_VERIFY_SERVICE_SID = process.env.TWILIO_VERIFY_SERVICE_SID || 'VAe554aec66d9657b6f8949312fc250e96'
+
+// Twilio client (lazy initialization)
+let twilioClient: any = null
+
+function getTwilioClient() {
+  if (!twilioClient && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    // Dynamic import to avoid errors if Twilio isn't installed
+    const twilio = require('twilio')
+    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+  }
+  return twilioClient
+}
 
 // Validation schemas
-const loginSchema = z.object({
+const requestOtpSchema = z.object({
   phone: z.string().min(10).max(15),
-  password: z.string().min(6),
 })
 
-const registerSchema = z.object({
+const verifyOtpSchema = z.object({
   phone: z.string().min(10).max(15),
-  password: z.string().min(6),
-  name: z.string().min(1).max(100),
-  role: z.nativeEnum(UserRole).optional(),
+  otp: z.string().length(6),
+  name: z.string().min(1).max(100).optional(), // Required for new users
 })
 
 const refreshSchema = z.object({
@@ -26,42 +38,142 @@ const refreshSchema = z.object({
 // Store refresh tokens (in production, use Redis)
 const refreshTokens = new Map<string, { userId: string; expiresAt: Date }>()
 
+// TEST MODE: Set to true to skip Twilio and use PIN 123456
+const TEST_MODE = true
+
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
   /**
-   * POST /api/auth/login - Login with phone and password
+   * POST /api/auth/request-otp - Request OTP for phone number
    */
-  fastify.post('/login', async (request, reply) => {
-    const body = loginSchema.parse(request.body)
+  fastify.post('/request-otp', async (request, reply) => {
+    const body = requestOtpSchema.parse(request.body)
+    const phone = body.phone.startsWith('+') ? body.phone : `+${body.phone}`
 
-    const user = await prisma.user.findUnique({
+    // TEST MODE: Skip Twilio, just accept any phone
+    if (TEST_MODE) {
+      fastify.log.info(`TEST MODE - Use PIN 123456 for ${phone}`)
+      return {
+        success: true,
+        data: {
+          message: 'Use PIN: 123456',
+          expiresIn: OTP_EXPIRY_MINUTES * 60,
+          testMode: true,
+        },
+      }
+    }
+
+    // Production: Send OTP via Twilio Verify Service
+    const client = getTwilioClient()
+    if (client && TWILIO_VERIFY_SERVICE_SID) {
+      try {
+        const verification = await client.verify.v2
+          .services(TWILIO_VERIFY_SERVICE_SID)
+          .verifications.create({
+            to: phone,
+            channel: 'sms',
+          })
+
+        fastify.log.info(`Twilio Verify sent to ${phone}, status: ${verification.status}`)
+
+        return {
+          success: true,
+          data: {
+            message: 'OTP sent successfully',
+            expiresIn: OTP_EXPIRY_MINUTES * 60,
+          },
+        }
+      } catch (error: any) {
+        fastify.log.error(`Failed to send OTP via Twilio Verify: ${error.message}`)
+        throw new AppError('Failed to send verification code. Please try again.', 500, 'OTP_SEND_FAILED')
+      }
+    } else {
+      throw new AppError('SMS service not configured', 500, 'SMS_NOT_CONFIGURED')
+    }
+  })
+
+  /**
+   * POST /api/auth/verify-otp - Verify OTP and login/register
+   */
+  fastify.post('/verify-otp', async (request, reply) => {
+    const body = verifyOtpSchema.parse(request.body)
+    const phone = body.phone.startsWith('+') ? body.phone : `+${body.phone}`
+
+    // TEST MODE: Accept PIN 123456
+    if (TEST_MODE) {
+      if (body.otp !== '123456') {
+        throw new UnauthorizedError('Invalid PIN. Use 123456')
+      }
+      fastify.log.info(`TEST MODE - PIN verified for ${phone}`)
+    } else {
+      // Production: Verify OTP via Twilio Verify Service
+      const client = getTwilioClient()
+
+      if (client && TWILIO_VERIFY_SERVICE_SID) {
+        try {
+          const verificationCheck = await client.verify.v2
+            .services(TWILIO_VERIFY_SERVICE_SID)
+            .verificationChecks.create({
+              to: phone,
+              code: body.otp,
+            })
+
+          if (verificationCheck.status !== 'approved') {
+            throw new UnauthorizedError('Invalid or expired verification code')
+          }
+          fastify.log.info(`Twilio Verify approved for ${phone}`)
+        } catch (error: any) {
+          if (error instanceof UnauthorizedError) {
+            throw error
+          }
+          fastify.log.error(`Twilio Verify check failed: ${error.message}`)
+          throw new UnauthorizedError('Verification failed. Please try again.')
+        }
+      } else {
+        throw new AppError('SMS service not configured', 500, 'SMS_NOT_CONFIGURED')
+      }
+    }
+
+    // Find or create user by phone
+    let user = await prisma.user.findUnique({
       where: { phone: body.phone },
     })
 
-    if (!user) {
-      throw new UnauthorizedError('Invalid phone or password')
+    const isNewUser = !user || !user.isVerified || !user.name
+
+    // For new users, require name
+    if (isNewUser && !body.name) {
+      throw new AppError('Name is required for new users', 400, 'VALIDATION_ERROR')
     }
 
-    const isValidPassword = await compare(body.password, user.password)
-    if (!isValidPassword) {
-      throw new UnauthorizedError('Invalid phone or password')
-    }
+    // Create or update user
+    const updatedUser = await prisma.user.upsert({
+      where: { phone: body.phone },
+      update: {
+        isVerified: true,
+        ...(isNewUser && body.name ? { name: body.name } : {}),
+      },
+      create: {
+        phone: body.phone,
+        name: body.name || '',
+        isVerified: true,
+      },
+    })
 
-    // Generate tokens
+    // Generate tokens (no role in JWT anymore)
     const accessToken = fastify.jwt.sign({
-      id: user.id,
-      phone: user.phone,
-      name: user.name,
-      role: user.role,
+      id: updatedUser.id,
+      phone: updatedUser.phone,
+      name: updatedUser.name,
     })
 
     const refreshToken = fastify.jwt.sign(
-      { id: user.id, type: 'refresh' },
+      { id: updatedUser.id, type: 'refresh' },
       { expiresIn: '7d' }
     )
 
     // Store refresh token
     refreshTokens.set(refreshToken, {
-      userId: user.id,
+      userId: updatedUser.id,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     })
 
@@ -78,89 +190,16 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       success: true,
       data: {
         user: {
-          id: user.id,
-          phone: user.phone,
-          name: user.name,
-          avatarUrl: user.avatarUrl,
-          role: user.role,
-          createdAt: user.createdAt,
+          id: updatedUser.id,
+          phone: updatedUser.phone,
+          name: updatedUser.name,
+          avatarUrl: updatedUser.avatarUrl,
+          isVerified: updatedUser.isVerified,
+          createdAt: updatedUser.createdAt,
         },
         accessToken,
         refreshToken,
-      },
-    }
-  })
-
-  /**
-   * POST /api/auth/register - Register a new user (Admin only)
-   */
-  fastify.post('/register', {
-    preHandler: [authenticate, requireAdmin],
-  }, async (request, reply) => {
-    const body = registerSchema.parse(request.body)
-
-    // Check if phone already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { phone: body.phone },
-    })
-
-    if (existingUser) {
-      throw new ConflictError('Phone number already registered')
-    }
-
-    // Check permission to create user with role
-    const targetRole = body.role || UserRole.STAFF
-    if (targetRole === UserRole.SUPER_ADMIN) {
-      throw new AppError('Cannot create Super Admin', 403, 'FORBIDDEN')
-    }
-    if (targetRole === UserRole.ADMIN && request.user.role !== UserRole.SUPER_ADMIN) {
-      throw new AppError('Only Super Admin can create Admin users', 403, 'FORBIDDEN')
-    }
-
-    // Hash password
-    const hashedPassword = await hash(body.password, 12)
-
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        phone: body.phone,
-        password: hashedPassword,
-        name: body.name,
-        role: targetRole,
-      },
-    })
-
-    // Generate tokens
-    const accessToken = fastify.jwt.sign({
-      id: user.id,
-      phone: user.phone,
-      name: user.name,
-      role: user.role,
-    })
-
-    const refreshToken = fastify.jwt.sign(
-      { id: user.id, type: 'refresh' },
-      { expiresIn: '7d' }
-    )
-
-    refreshTokens.set(refreshToken, {
-      userId: user.id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    })
-
-    return {
-      success: true,
-      data: {
-        user: {
-          id: user.id,
-          phone: user.phone,
-          name: user.name,
-          avatarUrl: user.avatarUrl,
-          role: user.role,
-          createdAt: user.createdAt,
-        },
-        accessToken,
-        refreshToken,
+        isNewUser,
       },
     }
   })
@@ -194,7 +233,6 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       id: user.id,
       phone: user.phone,
       name: user.name,
-      role: user.role,
     })
 
     const newRefreshToken = fastify.jwt.sign(
@@ -266,7 +304,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         phone: user.phone,
         name: user.name,
         avatarUrl: user.avatarUrl,
-        role: user.role,
+        isVerified: user.isVerified,
         createdAt: user.createdAt,
       },
     }

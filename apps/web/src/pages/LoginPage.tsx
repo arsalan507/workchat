@@ -1,36 +1,144 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 
+type Step = 'phone' | 'otp' | 'name'
+
 export default function LoginPage() {
   const navigate = useNavigate()
-  const login = useAuthStore((state) => state.login)
+  const { requestOtp, verifyOtp, otpPhone, otpExpiresIn, clearOtpState } = useAuthStore()
+
+  const [step, setStep] = useState<Step>('phone')
   const [phone, setPhone] = useState('')
-  const [password, setPassword] = useState('')
+  const [otp, setOtp] = useState('')
+  const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [countdown, setCountdown] = useState(0)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Handle OTP expiry countdown
+  useEffect(() => {
+    if (otpExpiresIn && otpExpiresIn > 0) {
+      setCountdown(otpExpiresIn)
+      const timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+      return () => clearInterval(timer)
+    }
+  }, [otpExpiresIn])
+
+  // Restore phone if OTP was already requested
+  useEffect(() => {
+    if (otpPhone) {
+      setPhone(otpPhone)
+      setStep('otp')
+    }
+  }, [otpPhone])
+
+  const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
 
+    // Ensure phone has + prefix for international format
+    let formattedPhone = phone.trim().replace(/\s+/g, '')
+    if (!formattedPhone.startsWith('+')) {
+      formattedPhone = '+' + formattedPhone
+    }
+
     try {
-      await login(phone, password)
-      navigate('/')
+      await requestOtp(formattedPhone)
+      setPhone(formattedPhone) // Update state with formatted phone
+      setStep('otp')
     } catch (err: any) {
-      setError(err.response?.data?.error?.message || 'Login failed')
+      setError(err.response?.data?.error?.message || 'Failed to send OTP')
     } finally {
       setLoading(false)
     }
   }
 
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+
+    try {
+      // First try without name - server will tell us if it's required
+      const result = await verifyOtp(phone, otp, name || undefined)
+      navigate('/')
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error?.message || 'Verification failed'
+      // Check if name is required for new user
+      if (errorMsg.includes('Name is required')) {
+        setStep('name')
+        setError('')
+      } else {
+        setError(errorMsg)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSetName = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) {
+      setError('Please enter your name')
+      return
+    }
+    setError('')
+    setLoading(true)
+
+    try {
+      await verifyOtp(phone, otp, name)
+      navigate('/')
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message || 'Registration failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    if (countdown > 0) return
+    setError('')
+    setLoading(true)
+
+    try {
+      await requestOtp(phone)
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message || 'Failed to resend OTP')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBack = () => {
+    clearOtpState()
+    setStep('phone')
+    setOtp('')
+    setName('')
+    setError('')
+  }
+
+  const formatCountdown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-whatsapp-teal">
+    <div className="min-h-screen flex items-center justify-center bg-[#00A884]">
       <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-whatsapp-green rounded-full mx-auto flex items-center justify-center mb-4">
+          <div className="w-20 h-20 bg-[#00A884] rounded-full mx-auto flex items-center justify-center mb-4">
             <svg
               className="w-12 h-12 text-white"
               fill="currentColor"
@@ -40,7 +148,11 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-gray-800">WorkChat</h1>
-          <p className="text-gray-500 mt-1">Sign in to continue</p>
+          <p className="text-gray-500 mt-1">
+            {step === 'phone' && 'Enter your phone number to continue'}
+            {step === 'otp' && 'Enter the verification code'}
+            {step === 'name' && 'Welcome! Enter your name to get started'}
+          </p>
         </div>
 
         {/* Error message */}
@@ -50,49 +162,132 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Login form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
-              Phone Number
-            </label>
-            <input
-              id="phone"
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="Enter your phone number"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-whatsapp-green focus:border-transparent outline-none"
-              required
-            />
-          </div>
+        {/* Step 1: Phone Number */}
+        {step === 'phone' && (
+          <form onSubmit={handleRequestOtp} className="space-y-6">
+            <div>
+              <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
+                Phone Number
+              </label>
+              <input
+                id="phone"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+91 9876543210"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00A884] focus:border-transparent outline-none"
+                required
+              />
+              <p className="text-sm text-gray-500 mt-2">
+                We'll send you a verification code via SMS
+              </p>
+            </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-whatsapp-green focus:border-transparent outline-none"
-              required
-            />
-          </div>
+            <button
+              type="submit"
+              disabled={loading || !phone}
+              className="w-full bg-[#00A884] text-white py-3 rounded-lg font-medium hover:bg-[#008c6f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Sending...' : 'Send OTP'}
+            </button>
+          </form>
+        )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-whatsapp-green text-white py-3 rounded-lg font-medium hover:bg-whatsapp-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+        {/* Step 2: OTP Verification */}
+        {step === 'otp' && (
+          <form onSubmit={handleVerifyOtp} className="space-y-6">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="otp" className="block text-sm font-medium text-gray-700">
+                  Verification Code
+                </label>
+                {countdown > 0 && (
+                  <span className="text-sm text-gray-500">
+                    Expires in {formatCountdown(countdown)}
+                  </span>
+                )}
+              </div>
+              <input
+                id="otp"
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Enter 6-digit code"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00A884] focus:border-transparent outline-none text-center text-2xl tracking-widest"
+                maxLength={6}
+                required
+              />
+              <p className="text-sm text-gray-500 mt-2">
+                Code sent to {phone}
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || otp.length !== 6}
+              className="w-full bg-[#00A884] text-white py-3 rounded-lg font-medium hover:bg-[#008c6f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Verifying...' : 'Verify'}
+            </button>
+
+            <div className="flex items-center justify-between text-sm">
+              <button
+                type="button"
+                onClick={handleBack}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                Change number
+              </button>
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={countdown > 0 || loading}
+                className={`${
+                  countdown > 0
+                    ? 'text-gray-400 cursor-not-allowed'
+                    : 'text-[#00A884] hover:text-[#008c6f]'
+                }`}
+              >
+                {countdown > 0 ? `Resend in ${formatCountdown(countdown)}` : 'Resend OTP'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Step 3: Name (for new users) */}
+        {step === 'name' && (
+          <form onSubmit={handleSetName} className="space-y-6">
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
+                Your Name
+              </label>
+              <input
+                id="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter your name"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00A884] focus:border-transparent outline-none"
+                autoFocus
+                required
+              />
+              <p className="text-sm text-gray-500 mt-2">
+                This is how others will see you in chats
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !name.trim()}
+              className="w-full bg-[#00A884] text-white py-3 rounded-lg font-medium hover:bg-[#008c6f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Creating account...' : 'Continue'}
+            </button>
+          </form>
+        )}
 
         <p className="text-center text-gray-500 text-sm mt-6">
-          Contact your admin if you don't have an account
+          By continuing, you agree to our Terms of Service
         </p>
       </div>
     </div>

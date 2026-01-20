@@ -2,22 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-/* WhatsApp-like base styles */
+/* WhatsApp Web Dark Theme Colors */
 :root {
-  --whatsapp-green: #25D366;
-  --whatsapp-green-dark: #128C7E;
-  --whatsapp-teal: #075E54;
-  --chat-bg: #ECE5DD;
-}
-
-.dark {
-  --chat-bg: #0B141A;
+  --wa-bg-default: #111B21;
+  --wa-bg-panel: #202C33;
+  --wa-bg-panel-header: #202C33;
+  --wa-bg-message-incoming: #202C33;
+  --wa-bg-message-outgoing: #005C4B;
+  --wa-bg-chat: #0B141A;
+  --wa-bg-input: #2A3942;
+  --wa-bg-hover: #2A3942;
+  --wa-bg-active: #2A3942;
+  --wa-border: #222D34;
+  --wa-text-primary: #E9EDEF;
+  --wa-text-secondary: #8696A0;
+  --wa-text-muted: #667781;
+  --wa-accent: #00A884;
+  --wa-accent-darker: #017561;
+  --wa-blue-check: #53BDEB;
 }
 
 body {
   font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: var(--wa-bg-default);
 }
 
 /* Chat background pattern */

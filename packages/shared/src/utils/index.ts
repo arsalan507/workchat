@@ -1,5 +1,5 @@
-import { TaskStatus, Task, UserRole, Permission } from '../types'
-import { ALLOWED_TRANSITIONS, PERMISSIONS } from '../constants'
+import { TaskStatus, Task, ChatMemberRole } from '../types'
+import { ALLOWED_TRANSITIONS, GROUP_PERMISSIONS, GroupPermission } from '../constants'
 
 // ============================================
 // TASK STATUS UTILITIES
@@ -57,33 +57,44 @@ export function canCompleteTask(task: Task): boolean {
 }
 
 // ============================================
-// PERMISSION UTILITIES
+// GROUP PERMISSION UTILITIES (WhatsApp-style)
 // ============================================
 
 /**
- * Check if a user role has a specific permission
+ * Check if a group member role has a specific permission
  */
-export function hasPermission(role: UserRole, permission: Permission): boolean {
-  return PERMISSIONS[role].includes(permission)
-}
-
-/**
- * Check if user can create another user with given role
- */
-export function canCreateUserWithRole(
-  creatorRole: UserRole,
-  targetRole: UserRole
+export function hasGroupPermission(
+  memberRole: ChatMemberRole,
+  permission: GroupPermission
 ): boolean {
-  if (creatorRole === UserRole.SUPER_ADMIN) return true
-  if (creatorRole === UserRole.ADMIN && targetRole === UserRole.STAFF) return true
-  return false
+  return GROUP_PERMISSIONS[memberRole].includes(permission)
 }
 
 /**
- * Check if user is admin or super admin
+ * Check if member is group admin (OWNER or ADMIN)
  */
-export function isAdmin(role: UserRole): boolean {
-  return role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN
+export function isGroupAdmin(memberRole: ChatMemberRole): boolean {
+  return memberRole === ChatMemberRole.OWNER || memberRole === ChatMemberRole.ADMIN
+}
+
+/**
+ * Check if member is group owner
+ */
+export function isGroupOwner(memberRole: ChatMemberRole): boolean {
+  return memberRole === ChatMemberRole.OWNER
+}
+
+/**
+ * Check if member can perform admin actions on another member
+ * OWNER can manage anyone, ADMIN can only manage MEMBER
+ */
+export function canManageMember(
+  actorRole: ChatMemberRole,
+  targetRole: ChatMemberRole
+): boolean {
+  if (actorRole === ChatMemberRole.OWNER) return true
+  if (actorRole === ChatMemberRole.ADMIN && targetRole === ChatMemberRole.MEMBER) return true
+  return false
 }
 
 // ============================================
@@ -175,10 +186,13 @@ export function formatDueDate(date: Date | string | null): string {
 export function getInitials(name: string): string {
   if (!name) return '?'
   const parts = name.trim().split(/\s+/)
+  if (parts.length === 0 || !parts[0]) return '?'
   if (parts.length === 1) {
     return parts[0].charAt(0).toUpperCase()
   }
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase()
+  const first = parts[0]
+  const last = parts[parts.length - 1]
+  return (first.charAt(0) + (last?.charAt(0) ?? '')).toUpperCase()
 }
 
 /**
@@ -219,10 +233,17 @@ export function isValidPhone(phone: string): boolean {
 }
 
 /**
- * Validate password strength
+ * Validate OTP format (6 digits)
  */
-export function isValidPassword(password: string): boolean {
-  return password.length >= 6
+export function isValidOtp(otp: string): boolean {
+  return /^\d{6}$/.test(otp)
+}
+
+/**
+ * Generate a random 6-digit OTP
+ */
+export function generateOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString()
 }
 
 // ============================================

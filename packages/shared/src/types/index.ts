@@ -2,23 +2,23 @@
 // USER TYPES
 // ============================================
 
-export enum UserRole {
-  SUPER_ADMIN = 'SUPER_ADMIN',
-  ADMIN = 'ADMIN',
-  STAFF = 'STAFF',
-}
-
 export interface User {
   id: string
   phone: string
   name: string
   avatarUrl: string | null
-  role: UserRole
+  isVerified: boolean
   createdAt: Date
 }
 
-export interface UserWithPassword extends User {
-  password: string
+// ============================================
+// CHAT MEMBER ROLES (WhatsApp-style)
+// ============================================
+
+export enum ChatMemberRole {
+  OWNER = 'OWNER',   // Group creator - full control
+  ADMIN = 'ADMIN',   // Promoted by owner - can manage members
+  MEMBER = 'MEMBER', // Regular member
 }
 
 // ============================================
@@ -28,11 +28,6 @@ export interface UserWithPassword extends User {
 export enum ChatType {
   DIRECT = 'DIRECT',
   GROUP = 'GROUP',
-}
-
-export enum ChatMemberRole {
-  OWNER = 'OWNER',
-  MEMBER = 'MEMBER',
 }
 
 export interface ChatMember {
@@ -204,22 +199,28 @@ export interface TaskActivity {
 // API REQUEST/RESPONSE TYPES
 // ============================================
 
-export interface LoginRequest {
+// OTP Authentication
+export interface RequestOtpRequest {
   phone: string
-  password: string
 }
 
-export interface RegisterRequest {
+export interface RequestOtpResponse {
+  success: boolean
+  message: string
+  expiresIn: number // seconds until OTP expires
+}
+
+export interface VerifyOtpRequest {
   phone: string
-  password: string
-  name: string
-  role?: UserRole
+  otp: string
+  name?: string // Required for new users
 }
 
 export interface AuthResponse {
   user: User
   accessToken: string
   refreshToken: string
+  isNewUser: boolean
 }
 
 export interface CreateChatRequest {
@@ -260,6 +261,20 @@ export interface UploadProofRequest {
   url: string
 }
 
+// Group Management
+export interface AddMembersRequest {
+  userIds: string[]
+}
+
+export interface PromoteMemberRequest {
+  userId: string
+}
+
+export interface UpdateGroupRequest {
+  name?: string
+  avatarUrl?: string
+}
+
 // ============================================
 // PAGINATION TYPES
 // ============================================
@@ -297,4 +312,7 @@ export interface SocketEvents {
   user_typing: { chatId: string; userId: string; isTyping: boolean }
   user_online: { userId: string }
   user_offline: { userId: string }
+  member_added: { chatId: string; member: ChatMember }
+  member_removed: { chatId: string; userId: string }
+  member_role_changed: { chatId: string; userId: string; newRole: ChatMemberRole }
 }

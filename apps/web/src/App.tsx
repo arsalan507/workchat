@@ -1,10 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 
-// Pages (placeholders - to be implemented)
+// Pages
 import LoginPage from './pages/LoginPage'
-import HomePage from './pages/HomePage'
-import ChatPage from './pages/ChatPage'
+import MainLayout from './pages/MainLayout'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((state) => state.token)
@@ -18,22 +17,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <div className="h-screen bg-gray-100 dark:bg-dark-bg">
+    <div className="h-screen bg-[#111B21]">
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
-          path="/"
+          path="/*"
           element={
             <ProtectedRoute>
-              <HomePage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/chat/:chatId"
-          element={
-            <ProtectedRoute>
-              <ChatPage />
+              <MainLayout />
             </ProtectedRoute>
           }
         />
