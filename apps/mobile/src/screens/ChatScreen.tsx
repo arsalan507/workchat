@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   View,
   Text,
@@ -8,26 +8,156 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Image,
 } from 'react-native'
-import { useNavigation, useRoute } from '@react-navigation/native'
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { api } from '../services/api'
+import { useAuthStore } from '../stores/authStore'
 
-// Placeholder messages
-const PLACEHOLDER_MESSAGES = [
-  { id: '1', content: 'Good morning team!', senderId: 'admin', createdAt: '10:30' },
-  { id: '2', content: 'Good morning!', senderId: 'me', createdAt: '10:31' },
-  { id: '3', content: 'Please complete the inventory count today.', senderId: 'admin', createdAt: '10:32', isTask: true, status: 'PENDING' },
-]
+interface Message {
+  id: string
+  content: string
+  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE'
+  fileUrl?: string
+  senderId: string
+  sender?: {
+    id: string
+    name: string
+  }
+  createdAt: string
+  isTask: boolean
+  task?: {
+    id: string
+    status: string
+    title: string
+  }
+  replyTo?: {
+    content: string
+    sender?: {
+      name: string
+    }
+  }
+}
+
+interface RouteParams {
+  chatId: string
+  chatName?: string
+}
+
+const TASK_STATUS_COLORS: Record<string, string> = {
+  PENDING: '#3B82F6',
+  IN_PROGRESS: '#EAB308',
+  COMPLETED: '#22C55E',
+  APPROVED: '#22C55E',
+  REOPENED: '#A855F7',
+}
 
 export default function ChatScreen() {
   const navigation = useNavigation()
   const route = useRoute()
+  const { chatId, chatName } = route.params as RouteParams
   const insets = useSafeAreaInsets()
+  const user = useAuthStore((state) => state.user)
+
+  const [messages, setMessages] = useState<Message[]>([])
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
   const [message, setMessage] = useState('')
+  const [chat, setChat] = useState<any>(null)
   const flatListRef = useRef<FlatList>(null)
 
-  const renderMessage = ({ item }: { item: typeof PLACEHOLDER_MESSAGES[0] }) => {
-    const isOwn = item.senderId === 'me'
+  const fetchMessages = async () => {
+    try {
+      const response = await api.get(`/api/chats/${chatId}/messages`)
+      // Messages come in reverse chronological order, reverse for display
+      setMessages((response.data.data || []).reverse())
+    } catch (error) {
+      console.error('Failed to fetch messages:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchChat = async () => {
+    try {
+      const response = await api.get(`/api/chats/${chatId}`)
+      setChat(response.data.data)
+    } catch (error) {
+      console.error('Failed to fetch chat:', error)
+    }
+  }
+
+  useEffect(() => {
+    fetchChat()
+    fetchMessages()
+  }, [chatId])
+
+  // Refresh messages when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchMessages()
+    }, [chatId])
+  )
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messages.length > 0 && flatListRef.current) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true })
+      }, 100)
+    }
+  }, [messages])
+
+  const handleSend = async () => {
+    if (!message.trim() || sending) return
+
+    setSending(true)
+    try {
+      const response = await api.post(`/api/chats/${chatId}/messages`, {
+        content: message.trim(),
+        type: 'TEXT',
+      })
+
+      // Add new message to list
+      setMessages((prev) => [...prev, response.data.data])
+      setMessage('')
+
+      // Scroll to bottom
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true })
+      }, 100)
+    } catch (error) {
+      console.error('Failed to send message:', error)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString)
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+
+  const getDisplayName = () => {
+    if (chatName) return chatName
+    if (!chat) return 'Loading...'
+
+    if (chat.type === 'GROUP') return chat.name
+
+    // For direct chats, show other person's name
+    const otherMember = chat.members?.find((m: any) => m.user.id !== user?.id)
+    return otherMember?.user.name || chat.name
+  }
+
+  const getMemberCount = () => {
+    if (!chat?.members) return ''
+    return `${chat.members.length} members`
+  }
+
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isOwn = item.senderId === user?.id
 
     return (
       <View style={[styles.messageContainer, isOwn ? styles.messageOwn : styles.messageOther]}>
@@ -35,21 +165,53 @@ export default function ChatScreen() {
           style={[
             styles.messageBubble,
             isOwn ? styles.bubbleOwn : styles.bubbleOther,
-            item.isTask && styles.taskBubble,
+            item.isTask && { borderLeftWidth: 4, borderLeftColor: TASK_STATUS_COLORS[item.task?.status || 'PENDING'] },
           ]}
         >
-          <Text style={styles.messageText}>{item.content}</Text>
-          {item.isTask && (
-            <View style={styles.taskIndicator}>
-              <View style={[styles.taskDot, { backgroundColor: '#3B82F6' }]} />
-              <Text style={styles.taskStatus}>{item.status}</Text>
+          {/* Sender name for group chats */}
+          {!isOwn && chat?.type === 'GROUP' && (
+            <Text style={styles.senderName}>{item.sender?.name}</Text>
+          )}
+
+          {/* Reply reference */}
+          {item.replyTo && (
+            <View style={styles.replyContainer}>
+              <Text style={styles.replyName}>{item.replyTo.sender?.name || 'Unknown'}</Text>
+              <Text style={styles.replyContent} numberOfLines={1}>{item.replyTo.content}</Text>
             </View>
           )}
-          <Text style={styles.messageTime}>{item.createdAt}</Text>
+
+          {/* Media content */}
+          {item.type === 'IMAGE' && item.fileUrl && (
+            <Image source={{ uri: item.fileUrl }} style={styles.messageImage} resizeMode="cover" />
+          )}
+
+          {/* Text content */}
+          {item.content && (
+            <Text style={styles.messageText}>{item.content}</Text>
+          )}
+
+          {/* Task indicator */}
+          {item.isTask && item.task && (
+            <View style={styles.taskIndicator}>
+              <View style={[styles.taskDot, { backgroundColor: TASK_STATUS_COLORS[item.task.status] }]} />
+              <Text style={styles.taskStatus}>{item.task.status.replace('_', ' ')}</Text>
+            </View>
+          )}
+
+          {/* Timestamp */}
+          <Text style={styles.messageTime}>{formatTime(item.createdAt)}</Text>
         </View>
       </View>
     )
   }
+
+  const renderEmpty = () => (
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyText}>No messages yet</Text>
+      <Text style={styles.emptySubtext}>Send a message to start the conversation</Text>
+    </View>
+  )
 
   return (
     <KeyboardAvoidingView
@@ -62,25 +224,34 @@ export default function ChatScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
-        <View style={styles.headerAvatar}>
-          <Text style={styles.headerAvatarText}>O</Text>
+        <View style={[styles.headerAvatar, chat?.type === 'GROUP' && styles.groupAvatar]}>
+          <Text style={styles.headerAvatarText}>{getDisplayName().charAt(0).toUpperCase()}</Text>
         </View>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Operations Team</Text>
-          <Text style={styles.headerSubtitle}>5 members</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{getDisplayName()}</Text>
+          {chat?.type === 'GROUP' && (
+            <Text style={styles.headerSubtitle}>{getMemberCount()}</Text>
+          )}
         </View>
       </View>
 
       {/* Messages */}
       <View style={styles.messagesContainer}>
-        <FlatList
-          ref={flatListRef}
-          data={PLACEHOLDER_MESSAGES}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
-          inverted={false}
-        />
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#128C7E" />
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={[styles.messagesList, messages.length === 0 && styles.messagesListEmpty]}
+            ListEmptyComponent={renderEmpty}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          />
+        )}
       </View>
 
       {/* Input */}
@@ -91,15 +262,21 @@ export default function ChatScreen() {
         <TextInput
           style={styles.input}
           placeholder="Type a message"
+          placeholderTextColor="#9CA3AF"
           value={message}
           onChangeText={setMessage}
           multiline
         />
         <TouchableOpacity
-          style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
-          disabled={!message.trim()}
+          style={[styles.sendButton, (!message.trim() || sending) && styles.sendButtonDisabled]}
+          disabled={!message.trim() || sending}
+          onPress={handleSend}
         >
-          <Text style={styles.sendIcon}>➤</Text>
+          {sending ? (
+            <ActivityIndicator size="small" color="#25D366" />
+          ) : (
+            <Text style={styles.sendIcon}>➤</Text>
+          )}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -129,15 +306,18 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#075E54',
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 8,
   },
+  groupAvatar: {
+    backgroundColor: '#25D366',
+  },
   headerAvatarText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#6B7280',
+    color: '#FFFFFF',
   },
   headerContent: {
     flex: 1,
@@ -155,8 +335,34 @@ const styles = StyleSheet.create({
   messagesContainer: {
     flex: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   messagesList: {
     padding: 8,
+    paddingBottom: 16,
+  },
+  messagesListEmpty: {
+    flex: 1,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginTop: 4,
+    textAlign: 'center',
   },
   messageContainer: {
     marginVertical: 2,
@@ -181,9 +387,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 0,
   },
-  taskBubble: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#3B82F6',
+  senderName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#128C7E',
+    marginBottom: 2,
+  },
+  replyContainer: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderLeftWidth: 2,
+    borderLeftColor: '#128C7E',
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
+    borderRadius: 4,
+  },
+  replyName: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#128C7E',
+  },
+  replyContent: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 4,
   },
   messageText: {
     fontSize: 15,
@@ -233,6 +465,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     maxHeight: 100,
     fontSize: 16,
+    color: '#111827',
   },
   sendButton: {
     padding: 8,
