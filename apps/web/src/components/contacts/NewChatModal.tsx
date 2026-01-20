@@ -47,6 +47,11 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'search' | 'group'>('search')
 
+  // Group creation state
+  const [groupName, setGroupName] = useState('')
+  const [groupSearchQuery, setGroupSearchQuery] = useState('')
+  const [selectedMembers, setSelectedMembers] = useState<User[]>([])
+
   // Search users query
   const { data: searchResults, isLoading: isSearching } = useQuery({
     queryKey: ['user-search', searchQuery],
@@ -71,6 +76,17 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
     enabled: searchQuery.length >= 10,
   })
 
+  // Search users for group query
+  const { data: groupSearchResults, isLoading: isGroupSearching } = useQuery({
+    queryKey: ['user-search-group', groupSearchQuery],
+    queryFn: async () => {
+      if (!groupSearchQuery || groupSearchQuery.length < 2) return []
+      const response = await api.get('/api/users', { params: { query: groupSearchQuery } })
+      return response.data.data as User[]
+    },
+    enabled: groupSearchQuery.length >= 2 && activeTab === 'group',
+  })
+
   // Start chat mutation
   const startChatMutation = useMutation({
     mutationFn: async (userId: string) => {
@@ -80,6 +96,24 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] })
       navigate(`/chat/${data.data.id}`)
+      onClose()
+    },
+  })
+
+  // Create group mutation
+  const createGroupMutation = useMutation({
+    mutationFn: async (data: { name: string; memberIds: string[] }) => {
+      const response = await api.post('/api/chats', {
+        type: 'GROUP',
+        name: data.name,
+        memberIds: data.memberIds,
+      })
+      return response.data
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] })
+      navigate(`/chat/${data.data.id}`)
+      resetGroupForm()
       onClose()
     },
   })
@@ -103,6 +137,36 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
   const handleStartChat = (userId: string) => {
     startChatMutation.mutate(userId)
   }
+
+  const handleAddMember = (user: User) => {
+    if (!selectedMembers.find((m) => m.id === user.id)) {
+      setSelectedMembers([...selectedMembers, user])
+    }
+    setGroupSearchQuery('')
+  }
+
+  const handleRemoveMember = (userId: string) => {
+    setSelectedMembers(selectedMembers.filter((m) => m.id !== userId))
+  }
+
+  const handleCreateGroup = () => {
+    if (!groupName.trim() || selectedMembers.length === 0) return
+    createGroupMutation.mutate({
+      name: groupName.trim(),
+      memberIds: selectedMembers.map((m) => m.id),
+    })
+  }
+
+  const resetGroupForm = () => {
+    setGroupName('')
+    setGroupSearchQuery('')
+    setSelectedMembers([])
+  }
+
+  // Filter out already selected members from search results
+  const availableGroupUsers = (groupSearchResults || []).filter(
+    (user) => !selectedMembers.find((m) => m.id === user.id)
+  )
 
   if (!isOpen) return null
 
@@ -209,11 +273,127 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
             </div>
           </>
         ) : (
-          /* Group creation - coming soon */
-          <div className="flex flex-col items-center justify-center py-12 text-[#8696A0] px-8 text-center">
-            <GroupIcon />
-            <p className="text-sm mt-3">Create a new group</p>
-            <p className="text-xs mt-1 opacity-75">Coming soon...</p>
+          /* Group creation */
+          <div className="flex flex-col">
+            {/* Group name input */}
+            <div className="p-4 bg-[#111B21] border-b border-[#222D34]">
+              <input
+                type="text"
+                placeholder="Group name"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                className="w-full bg-[#202C33] text-[#E9EDEF] placeholder-[#8696A0] rounded-lg px-4 py-2.5 outline-none text-sm focus:ring-1 focus:ring-[#00A884]"
+                autoFocus
+              />
+            </div>
+
+            {/* Selected members */}
+            {selectedMembers.length > 0 && (
+              <div className="p-3 bg-[#111B21] border-b border-[#222D34]">
+                <p className="text-xs text-[#8696A0] mb-2">
+                  {selectedMembers.length} member{selectedMembers.length > 1 ? 's' : ''} selected
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center gap-2 bg-[#202C33] rounded-full px-3 py-1.5"
+                    >
+                      <div className="w-6 h-6 rounded-full bg-[#6B7C85] flex items-center justify-center text-white text-xs">
+                        {member.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-sm text-[#E9EDEF]">{member.name}</span>
+                      <button
+                        onClick={() => handleRemoveMember(member.id)}
+                        className="text-[#8696A0] hover:text-white"
+                      >
+                        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor">
+                          <path d="M19.1 17.2l-5.3-5.3 5.3-5.3-1.8-1.8-5.3 5.4-5.3-5.3-1.8 1.7 5.3 5.3-5.3 5.3L6.7 19l5.3-5.3 5.3 5.3 1.8-1.8z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Search members */}
+            <div className="p-4 bg-[#111B21]">
+              <div className="flex items-center gap-3 bg-[#202C33] rounded-lg px-4 py-2">
+                <SearchIcon />
+                <input
+                  type="text"
+                  placeholder="Add members..."
+                  value={groupSearchQuery}
+                  onChange={(e) => setGroupSearchQuery(e.target.value)}
+                  className="flex-1 bg-transparent text-[#E9EDEF] placeholder-[#8696A0] outline-none text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Search results */}
+            <div className="max-h-[250px] overflow-y-auto">
+              {isGroupSearching ? (
+                <div className="flex items-center justify-center py-6">
+                  <div className="animate-spin w-6 h-6 border-2 border-[#00A884] border-t-transparent rounded-full" />
+                </div>
+              ) : groupSearchQuery.length >= 2 && availableGroupUsers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-[#8696A0] px-8 text-center">
+                  <p className="text-sm">No users found</p>
+                </div>
+              ) : groupSearchQuery.length < 2 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-[#8696A0] px-8 text-center">
+                  <p className="text-sm">Search to add members</p>
+                </div>
+              ) : (
+                availableGroupUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    onClick={() => handleAddMember(user)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#202C33] transition-colors text-left"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-[#6B7C85] flex items-center justify-center text-white font-medium">
+                      {user.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-[#E9EDEF] text-sm truncate">{user.name}</h3>
+                      <p className="text-xs text-[#8696A0] truncate">{user.phone}</p>
+                    </div>
+                    <div className="text-[#00A884]">
+                      <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                      </svg>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Create button */}
+            <div className="p-4 bg-[#111B21] border-t border-[#222D34]">
+              <button
+                onClick={handleCreateGroup}
+                disabled={!groupName.trim() || selectedMembers.length === 0 || createGroupMutation.isPending}
+                className="w-full bg-[#00A884] text-white font-medium py-2.5 rounded-lg hover:bg-[#00957A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {createGroupMutation.isPending ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <GroupIcon />
+                    Create Group
+                  </>
+                )}
+              </button>
+              {selectedMembers.length === 0 && (
+                <p className="text-xs text-[#8696A0] text-center mt-2">
+                  Add at least one member to create a group
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
