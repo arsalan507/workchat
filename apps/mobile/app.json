@@ -2,7 +2,7 @@
   "expo": {
     "name": "WorkChat",
     "slug": "workchat",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -41,8 +41,8 @@
       "expo-document-picker"
     ],
     "extra": {
-      "apiUrl": "http://localhost:3000",
-      "wsUrl": "ws://localhost:3000",
+      "apiUrl": "https://workchat-api.kineticx.cloud",
+      "wsUrl": "wss://workchat-api.kineticx.cloud",
       "eas": {
         "projectId": "your-project-id"
       }
