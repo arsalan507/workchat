@@ -52,16 +52,20 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build APK with EAS
+      - name: Expo Prebuild
         working-directory: apps/mobile
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build APK with Gradle
+        working-directory: apps/mobile/android
         run: |
-          eas build --platform android --profile preview --local --output ./workchat.apk
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Move APK to expected location
+        run: |
+          mkdir -p apps/mobile
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk apps/mobile/workchat.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
