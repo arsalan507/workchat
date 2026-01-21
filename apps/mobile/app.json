@@ -40,6 +40,7 @@
       "expo-image-picker",
       "expo-document-picker"
     ],
+    "scheme": "workchat",
     "extra": {
       "apiUrl": "https://workchat-api.kineticx.cloud",
       "wsUrl": "wss://workchat-api.kineticx.cloud",

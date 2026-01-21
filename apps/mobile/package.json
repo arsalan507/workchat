@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "WorkChat Mobile Application - React Native Expo",
-  "main": "expo-router/entry",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "dev": "expo start",
     "android": "expo run:android",
