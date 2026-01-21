@@ -77,9 +77,9 @@ jobs:
           host: ${{ secrets.OVH_HOST }}
           username: ${{ secrets.OVH_USERNAME }}
           key: ${{ secrets.OVH_SSH_KEY }}
-          port: ${{ secrets.OVH_PORT || 22 }}
+          port: ${{ secrets.OVH_PORT }}
           source: "apps/mobile/workchat.apk"
-          target: "/var/www/workchat/downloads/"
+          target: "/data/coolify/applications/aok8s8ks4kcg8ksgso8kcowg/downloads/"
           strip_components: 2
 
       - name: Set permissions on APK
@@ -89,7 +89,7 @@ jobs:
           host: ${{ secrets.OVH_HOST }}
           username: ${{ secrets.OVH_USERNAME }}
           key: ${{ secrets.OVH_SSH_KEY }}
-          port: ${{ secrets.OVH_PORT || 22 }}
+          port: ${{ secrets.OVH_PORT }}
           script: |
-            chmod 644 /var/www/workchat/downloads/workchat.apk
+            chmod 644 /data/coolify/applications/aok8s8ks4kcg8ksgso8kcowg/downloads/workchat.apk
             echo "APK deployed successfully at $(date)"
