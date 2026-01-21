@@ -1,0 +1,51 @@
+# WorkChat API Dockerfile
+FROM node:20-alpine AS base
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@9 --activate
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+
+# Copy package files
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/api/package.json ./packages/api/
+COPY packages/database/package.json ./packages/database/
+COPY packages/shared/package.json ./packages/shared/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY packages/api ./packages/api
+COPY packages/database ./packages/database
+COPY packages/shared ./packages/shared
+
+# Generate Prisma client and build packages
+RUN cd packages/database && pnpm run build
+RUN cd packages/shared && pnpm run build
+RUN cd packages/api && pnpm run build
+
+# Production stage
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy built files
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/api/dist ./packages/api/dist
+COPY --from=builder /app/packages/api/package.json ./packages/api/
+COPY --from=builder /app/packages/database/dist ./packages/database/dist
+COPY --from=builder /app/packages/database/package.json ./packages/database/
+COPY --from=builder /app/packages/database/prisma ./packages/database/prisma
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+COPY --from=builder /app/packages/database/node_modules/.prisma ./packages/database/node_modules/.prisma
+
+WORKDIR /app/packages/api
+
+EXPOSE 3000
+
+CMD ["node", "dist/server.js"]
