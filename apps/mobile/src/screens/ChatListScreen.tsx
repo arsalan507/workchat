@@ -13,17 +13,17 @@ interface Chat {
     content: string
     type: string
     createdAt: string
-    sender?: {
-      name: string
-    }
+    senderName?: string
   }
   members?: Array<{
+    userId: string
     user: {
       id: string
       name: string
     }
   }>
-  updatedAt: string
+  updatedAt?: string
+  createdAt?: string
 }
 
 export default function ChatListScreen() {
@@ -39,10 +39,15 @@ export default function ChatListScreen() {
 
   const fetchChats = async () => {
     try {
+      console.log('[ChatList] Fetching chats...')
       const response = await api.get('/api/chats')
-      setChats(response.data.data || [])
-    } catch (error) {
-      console.error('Failed to fetch chats:', error)
+      console.log('[ChatList] Response:', JSON.stringify(response.data, null, 2))
+      const chatData = response.data.data || []
+      console.log('[ChatList] Chats count:', chatData.length)
+      setChats(chatData)
+    } catch (error: any) {
+      console.error('[ChatList] Failed to fetch chats:', error.message)
+      console.error('[ChatList] Error details:', error.response?.data)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -86,8 +91,8 @@ export default function ChatListScreen() {
   const getLastMessagePreview = (chat: Chat) => {
     if (!chat.lastMessage) return 'No messages yet'
 
-    const { type, content, sender } = chat.lastMessage
-    const prefix = chat.type === 'GROUP' && sender ? `${sender.name}: ` : ''
+    const { type, content, senderName } = chat.lastMessage
+    const prefix = chat.type === 'GROUP' && senderName ? `${senderName}: ` : ''
 
     switch (type) {
       case 'TEXT':
@@ -122,7 +127,7 @@ export default function ChatListScreen() {
   const renderChat = ({ item }: { item: Chat }) => (
     <TouchableOpacity
       style={styles.chatItem}
-      onPress={() => navigation.navigate('Chat' as never, { chatId: item.id, chatName: getChatDisplayName(item) } as never)}
+      onPress={() => (navigation as any).navigate('Chat', { chatId: item.id, chatName: getChatDisplayName(item) })}
     >
       <View style={[styles.avatar, item.type === 'GROUP' && styles.groupAvatar]}>
         <Text style={styles.avatarText}>{getChatDisplayName(item).charAt(0).toUpperCase()}</Text>
@@ -133,7 +138,7 @@ export default function ChatListScreen() {
             {getChatDisplayName(item)}
           </Text>
           <Text style={styles.chatTime}>
-            {item.lastMessage?.createdAt ? formatTime(item.lastMessage.createdAt) : formatTime(item.updatedAt)}
+            {item.lastMessage?.createdAt ? formatTime(item.lastMessage.createdAt) : (item.updatedAt ? formatTime(item.updatedAt) : '')}
           </Text>
         </View>
         <Text style={styles.chatLastMessage} numberOfLines={1}>
