@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
+import { api } from './api'
 
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000'
 
@@ -40,11 +41,23 @@ class SocketService {
       forceNew: true,
     })
 
-    this.socket.on('connect', () => {
+    this.socket.on('connect', async () => {
       console.log('[Socket] Connected:', this.socket?.id)
       this.isConnecting = false
 
-      // Join any pending chat rooms
+      // Join ALL user's chats so we receive notifications for all of them
+      try {
+        const response = await api.get('/api/chats')
+        const chats = response.data.data || []
+        console.log('[Socket] Joining all user chats:', chats.length)
+        chats.forEach((chat: { id: string }) => {
+          this.socket?.emit('join_chat', { chatId: chat.id })
+        })
+      } catch (error) {
+        console.log('[Socket] Failed to fetch chats for auto-join:', error)
+      }
+
+      // Also join any pending chat rooms (for the currently open chat)
       this.pendingChatJoins.forEach((chatId) => {
         console.log('[Socket] Auto-joining pending chat:', chatId)
         this.socket?.emit('join_chat', { chatId })
