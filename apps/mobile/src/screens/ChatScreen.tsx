@@ -5,16 +5,19 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Image,
+  Modal,
 } from 'react-native'
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
+import ConvertToTaskModal from '../components/chat/ConvertToTaskModal'
 
 interface Message {
   id: string
@@ -67,6 +70,11 @@ export default function ChatScreen() {
   const [message, setMessage] = useState('')
   const [chat, setChat] = useState<any>(null)
   const flatListRef = useRef<FlatList>(null)
+
+  // Long-press menu state
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
+  const [showMessageMenu, setShowMessageMenu] = useState(false)
+  const [showConvertModal, setShowConvertModal] = useState(false)
 
   const fetchMessages = async () => {
     try {
@@ -156,11 +164,52 @@ export default function ChatScreen() {
     return `${chat.members.length} members`
   }
 
+  // Check if current user is admin/owner of the chat (can convert messages to tasks)
+  const canConvertToTask = () => {
+    if (!chat?.members || !user) return false
+    const currentMember = chat.members.find((m: any) => m.user.id === user.id)
+    return currentMember?.role === 'OWNER' || currentMember?.role === 'ADMIN'
+  }
+
+  // Long-press handler for messages
+  const handleMessageLongPress = (msg: Message) => {
+    // Only show menu if not already a task and user can convert
+    if (!msg.isTask && canConvertToTask()) {
+      setSelectedMessage(msg)
+      setShowMessageMenu(true)
+    }
+  }
+
+  // Handle convert to task action
+  const handleConvertToTask = () => {
+    setShowMessageMenu(false)
+    setShowConvertModal(true)
+  }
+
+  // Handle successful task conversion
+  const handleTaskConversionSuccess = () => {
+    setShowConvertModal(false)
+    setSelectedMessage(null)
+    fetchMessages() // Refresh messages to show the task
+  }
+
+  // Close message menu
+  const closeMessageMenu = () => {
+    setShowMessageMenu(false)
+    setSelectedMessage(null)
+  }
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isOwn = item.senderId === user?.id
+    const canShowMenu = !item.isTask && canConvertToTask()
 
     return (
-      <View style={[styles.messageContainer, isOwn ? styles.messageOwn : styles.messageOther]}>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onLongPress={() => canShowMenu && handleMessageLongPress(item)}
+        delayLongPress={500}
+        style={[styles.messageContainer, isOwn ? styles.messageOwn : styles.messageOther]}
+      >
         <View
           style={[
             styles.messageBubble,
@@ -202,7 +251,7 @@ export default function ChatScreen() {
           {/* Timestamp */}
           <Text style={styles.messageTime}>{formatTime(item.createdAt)}</Text>
         </View>
-      </View>
+      </TouchableOpacity>
     )
   }
 
@@ -279,6 +328,50 @@ export default function ChatScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Message Action Menu */}
+      <Modal
+        visible={showMessageMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMessageMenu}
+      >
+        <Pressable style={styles.menuOverlay} onPress={closeMessageMenu}>
+          <View style={styles.menuContainer}>
+            <Text style={styles.menuTitle}>Message Options</Text>
+            {selectedMessage && (
+              <View style={styles.menuMessagePreview}>
+                <Text style={styles.menuMessageText} numberOfLines={2}>
+                  {selectedMessage.content}
+                </Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.menuItem} onPress={handleConvertToTask}>
+              <Text style={styles.menuItemIcon}>📋</Text>
+              <Text style={styles.menuItemText}>Convert to Task</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuCancelButton} onPress={closeMessageMenu}>
+              <Text style={styles.menuCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Convert to Task Modal */}
+      <ConvertToTaskModal
+        visible={showConvertModal}
+        onClose={() => {
+          setShowConvertModal(false)
+          setSelectedMessage(null)
+        }}
+        message={selectedMessage ? {
+          id: selectedMessage.id,
+          content: selectedMessage.content || '',
+          chatId: chatId,
+        } : null}
+        members={chat?.members || []}
+        onSuccess={handleTaskConversionSuccess}
+      />
     </KeyboardAvoidingView>
   )
 }
@@ -477,5 +570,66 @@ const styles = StyleSheet.create({
   sendIcon: {
     fontSize: 24,
     color: '#25D366',
+  },
+  // Message menu styles
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  menuContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 320,
+    padding: 16,
+  },
+  menuTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  menuMessagePreview: {
+    backgroundColor: '#F3F4F6',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: '#128C7E',
+  },
+  menuMessageText: {
+    fontSize: 14,
+    color: '#374151',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  menuItemIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  menuItemText: {
+    fontSize: 16,
+    color: '#111827',
+    fontWeight: '500',
+  },
+  menuCancelButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  menuCancelText: {
+    fontSize: 16,
+    color: '#6B7280',
   },
 })
