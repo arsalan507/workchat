@@ -113,8 +113,11 @@ export default function ChatScreen() {
     // Listen for new messages
     const unsubscribeNewMessage = socketService.on('new_message', (data: { chatId: string; message: Message }) => {
       if (data.chatId === chatId) {
-        // Only add message if it's not from current user (we already added it optimistically)
-        // or if the message ID doesn't exist in our list
+        // Skip if this is our own message - we already added it when sending
+        if (data.message.senderId === user?.id) {
+          return
+        }
+        // Only add message if it doesn't already exist
         setMessages((prev) => {
           const exists = prev.some((m) => m.id === data.message.id)
           if (exists) return prev
