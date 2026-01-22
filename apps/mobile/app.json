@@ -43,8 +43,8 @@
     ],
     "scheme": "workchat",
     "extra": {
-      "apiUrl": "http://e4884ck0w8ww0sokksk4kkok.51.195.46.40.sslip.io",
-      "wsUrl": "ws://e4884ck0w8ww0sokksk4kkok.51.195.46.40.sslip.io",
+      "apiUrl": "https://workchatapi.2xg.in",
+      "wsUrl": "wss://workchatapi.2xg.in",
       "eas": {
         "projectId": "your-project-id"
       }
