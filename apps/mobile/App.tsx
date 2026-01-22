@@ -13,6 +13,7 @@ import ChatScreen from './src/screens/ChatScreen'
 import TasksScreen from './src/screens/TasksScreen'
 import UpdatesScreen from './src/screens/UpdatesScreen'
 import NewChatScreen from './src/screens/NewChatScreen'
+import NewGroupScreen from './src/screens/NewGroupScreen'
 import Header from './src/components/ui/Header'
 import { useAuthStore } from './src/stores/authStore'
 import { useChatStore } from './src/stores/chatStore'
@@ -183,6 +184,7 @@ function RootNavigator() {
           <Stack.Screen name="Main" component={MainTabs} />
           <Stack.Screen name="Chat" component={ChatScreen} />
           <Stack.Screen name="NewChat" component={NewChatScreen} />
+          <Stack.Screen name="NewGroup" component={NewGroupScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

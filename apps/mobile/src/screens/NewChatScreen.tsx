@@ -182,6 +182,21 @@ export default function NewChatScreen() {
         <View style={{ width: 40 }} />
       </View>
 
+      {/* New Group Option */}
+      <TouchableOpacity
+        style={styles.newGroupOption}
+        onPress={() => (navigation as any).navigate('NewGroup')}
+      >
+        <View style={styles.newGroupIcon}>
+          <Text style={styles.newGroupIconText}>👥</Text>
+        </View>
+        <View style={styles.newGroupInfo}>
+          <Text style={styles.newGroupTitle}>New Group</Text>
+          <Text style={styles.newGroupSubtitle}>Create a group with multiple people</Text>
+        </View>
+        <Text style={styles.newGroupArrow}>›</Text>
+      </TouchableOpacity>
+
       {/* Search Input */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputWrapper}>
@@ -386,5 +401,43 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  newGroupOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  newGroupIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#25D366',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  newGroupIconText: {
+    fontSize: 24,
+  },
+  newGroupInfo: {
+    flex: 1,
+  },
+  newGroupTitle: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  newGroupSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  newGroupArrow: {
+    fontSize: 24,
+    color: '#9CA3AF',
   },
 })

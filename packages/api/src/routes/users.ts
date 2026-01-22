@@ -27,6 +27,10 @@ const startChatSchema = z.object({
   userId: z.string(),
 })
 
+const matchContactsSchema = z.object({
+  phones: z.array(z.string()).min(1).max(500),
+})
+
 export const userRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/users - Search users by name or phone (excludes self)
@@ -248,6 +252,45 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         lastMessage: null,
       },
       isNew: true,
+    }
+  })
+
+  /**
+   * POST /api/users/match-contacts - Find WorkChat users from phone contacts
+   * Used to sync contacts and show which contacts are on WorkChat
+   */
+  fastify.post('/match-contacts', {
+    preHandler: [authenticate],
+  }, async (request) => {
+    const { phones } = matchContactsSchema.parse(request.body)
+    const currentUserId = request.user.id
+
+    // Normalize phone numbers (add + prefix if missing)
+    const normalizedPhones = phones.map((phone) => {
+      const cleaned = phone.replace(/[\s\-()]/g, '')
+      return cleaned.startsWith('+') ? cleaned : `+${cleaned}`
+    })
+
+    // Find users matching these phone numbers (exclude self)
+    const users = await prisma.user.findMany({
+      where: {
+        phone: { in: normalizedPhones },
+        isVerified: true,
+        id: { not: currentUserId },
+      },
+      select: {
+        id: true,
+        phone: true,
+        name: true,
+        avatarUrl: true,
+        createdAt: true,
+      },
+      orderBy: { name: 'asc' },
+    })
+
+    return {
+      success: true,
+      data: users,
     }
   })
 
