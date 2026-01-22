@@ -144,9 +144,9 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    // Find or create user by phone
+    // Find or create user by phone (use normalized phone with + prefix)
     let user = await prisma.user.findUnique({
-      where: { phone: body.phone },
+      where: { phone },
     })
 
     const isNewUser = !user || !user.isVerified || !user.name
@@ -156,15 +156,15 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Name is required for new users', 400, 'VALIDATION_ERROR')
     }
 
-    // Create or update user
+    // Create or update user (use normalized phone with + prefix)
     const updatedUser = await prisma.user.upsert({
-      where: { phone: body.phone },
+      where: { phone },
       update: {
         isVerified: true,
         ...(isNewUser && body.name ? { name: body.name } : {}),
       },
       create: {
-        phone: body.phone,
+        phone,
         name: body.name || '',
         isVerified: true,
       },
