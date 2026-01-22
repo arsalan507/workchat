@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { api } from '../services/api'
+import { socketService } from '../services/socket'
 
 interface User {
   id: string
@@ -66,6 +67,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           const response = await api.get('/api/auth/me')
           set({ user: response.data.data })
           await AsyncStorage.setItem('workchat-user', JSON.stringify(response.data.data))
+          // Connect socket after successful auth
+          socketService.connect()
         } catch (error: any) {
           // If 401 and we have a refresh token, try to refresh
           if (error.response?.status === 401 && storedRefreshToken) {
@@ -148,6 +151,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       })
 
+      // Connect socket after login
+      socketService.connect()
+
       return { isNewUser }
     } catch (error) {
       set({ isLoading: false })
@@ -156,6 +162,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Disconnect socket before logout
+    socketService.disconnect()
+
     try {
       await api.post('/api/auth/logout')
     } catch (error) {

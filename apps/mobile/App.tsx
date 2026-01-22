@@ -1,11 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { StatusBar } from 'expo-status-bar'
 import { NavigationContainer } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native'
+import { View, Text, ActivityIndicator, StyleSheet, AppState } from 'react-native'
 
 import LoginScreen from './src/screens/LoginScreen'
 import ChatListScreen from './src/screens/ChatListScreen'
@@ -15,6 +15,9 @@ import UpdatesScreen from './src/screens/UpdatesScreen'
 import NewChatScreen from './src/screens/NewChatScreen'
 import Header from './src/components/ui/Header'
 import { useAuthStore } from './src/stores/authStore'
+import { useChatStore } from './src/stores/chatStore'
+import { notificationService } from './src/services/notifications'
+import { socketService } from './src/services/socket'
 
 const Stack = createNativeStackNavigator()
 const Tab = createBottomTabNavigator()
@@ -101,10 +104,65 @@ function MainTabs() {
 
 function RootNavigator() {
   const { user, isInitialized, initialize } = useAuthStore()
+  const currentChatId = useChatStore((state) => state.currentChatId)
+  const appState = useRef(AppState.currentState)
 
   useEffect(() => {
     initialize()
+
+    // Initialize notifications
+    notificationService.initialize()
+
+    // Listen for notification taps to navigate to chat
+    const responseSubscription = notificationService.addNotificationResponseListener(
+      (response) => {
+        const data = response.notification.request.content.data
+        if (data?.chatId) {
+          // Navigation will be handled by the NavigationContainer
+          console.log('[App] Notification tapped, chatId:', data.chatId)
+        }
+      }
+    )
+
+    // Track app state changes
+    const appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      appState.current = nextAppState
+    })
+
+    return () => {
+      responseSubscription.remove()
+      appStateSubscription.remove()
+    }
   }, [])
+
+  // Separate effect for listening to new messages (depends on user and currentChatId)
+  useEffect(() => {
+    if (!user) return
+
+    // Listen for new messages and show notifications when app is backgrounded
+    const unsubscribeNewMessage = socketService.on('new_message', async (data: any) => {
+      const isBackground = appState.current !== 'active'
+      const isCurrentChat = currentChatId === data.chatId
+      const isOwnMessage = data.message?.senderId === user.id
+
+      // Show notification if app is in background OR user is not in this chat
+      // Don't show notification for own messages
+      if (!isOwnMessage && (isBackground || !isCurrentChat)) {
+        const senderName = data.message?.sender?.name || 'Someone'
+        const content = data.message?.content || 'Sent a message'
+
+        await notificationService.showLocalNotification({
+          title: senderName,
+          body: content.length > 50 ? content.substring(0, 50) + '...' : content,
+          data: { chatId: data.chatId },
+        })
+      }
+    })
+
+    return () => {
+      unsubscribeNewMessage()
+    }
+  }, [user?.id, currentChatId])
 
   if (!isInitialized) {
     return (

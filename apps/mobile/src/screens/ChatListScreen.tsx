@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, TextInput } from 'react-native'
 import { useNavigation, useFocusEffect } from '@react-navigation/native'
 import { api } from '../services/api'
+import { socketService } from '../services/socket'
 import { useAuthStore } from '../stores/authStore'
 
 interface Chat {
@@ -51,9 +52,25 @@ export default function ChatListScreen() {
     }
   }
 
-  // Fetch on mount
+  // Fetch on mount and listen for real-time updates
   useEffect(() => {
     fetchChats()
+
+    // Listen for new messages to update chat list
+    const unsubscribeNewMessage = socketService.on('new_message', () => {
+      // Refresh chat list when any new message arrives
+      fetchChats()
+    })
+
+    // Listen for new chats created
+    const unsubscribeChatCreated = socketService.on('chat_created', () => {
+      fetchChats()
+    })
+
+    return () => {
+      unsubscribeNewMessage()
+      unsubscribeChatCreated()
+    }
   }, [])
 
   // Refetch when screen comes into focus

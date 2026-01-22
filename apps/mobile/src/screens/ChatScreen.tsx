@@ -16,7 +16,9 @@ import {
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { api } from '../services/api'
+import { socketService } from '../services/socket'
 import { useAuthStore } from '../stores/authStore'
+import { useChatStore } from '../stores/chatStore'
 import ConvertToTaskModal from '../components/chat/ConvertToTaskModal'
 
 interface Message {
@@ -63,6 +65,7 @@ export default function ChatScreen() {
   const { chatId, chatName } = route.params as RouteParams
   const insets = useSafeAreaInsets()
   const user = useAuthStore((state) => state.user)
+  const setCurrentChatId = useChatStore((state) => state.setCurrentChatId)
 
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
@@ -98,14 +101,55 @@ export default function ChatScreen() {
   }
 
   useEffect(() => {
+    // Track current chat for notification suppression
+    setCurrentChatId(chatId)
+
     fetchChat()
     fetchMessages()
+
+    // Join the chat room for real-time updates
+    socketService.joinChat(chatId)
+
+    // Listen for new messages
+    const unsubscribeNewMessage = socketService.on('new_message', (data: { chatId: string; message: Message }) => {
+      if (data.chatId === chatId) {
+        // Only add message if it's not from current user (we already added it optimistically)
+        // or if the message ID doesn't exist in our list
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.id === data.message.id)
+          if (exists) return prev
+          return [...prev, data.message]
+        })
+      }
+    })
+
+    // Listen for task conversions
+    const unsubscribeTaskConversion = socketService.on('message_converted_to_task', (data: { chatId: string; messageId: string; task: any }) => {
+      if (data.chatId === chatId) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === data.messageId
+              ? { ...m, isTask: true, task: data.task }
+              : m
+          )
+        )
+      }
+    })
+
+    return () => {
+      setCurrentChatId(null)
+      socketService.leaveChat(chatId)
+      unsubscribeNewMessage()
+      unsubscribeTaskConversion()
+    }
   }, [chatId])
 
   // Refresh messages when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       fetchMessages()
+      // Rejoin chat room when screen comes into focus
+      socketService.joinChat(chatId)
     }, [chatId])
   )
 

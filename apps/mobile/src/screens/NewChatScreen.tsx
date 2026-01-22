@@ -48,18 +48,37 @@ export default function NewChatScreen() {
       const isPhoneNumber = /^[\d+\s-]+$/.test(query.trim())
 
       if (isPhoneNumber) {
-        // Clean the phone number
+        // Clean the phone number - remove spaces and dashes
         const cleanPhone = query.replace(/[\s-]/g, '')
-        const response = await api.get('/api/users/search-phone', {
+
+        // Try exact phone search first
+        const phoneResponse = await api.get('/api/users/search-phone', {
           params: { phone: cleanPhone },
         })
 
-        if (response.data.data) {
-          setSearchResults([response.data.data])
+        if (phoneResponse.data.data) {
+          setSearchResults([phoneResponse.data.data])
           setNotFound(false)
         } else {
-          setSearchResults([])
-          setNotFound(true)
+          // If exact phone search fails, try general search (which also searches phone)
+          const generalResponse = await api.get('/api/users', {
+            params: { query: cleanPhone },
+          })
+
+          if (generalResponse.data.data?.length > 0) {
+            setSearchResults(generalResponse.data.data)
+            setNotFound(false)
+          } else {
+            setSearchResults([])
+            // Check if user searched for their own number
+            const message = phoneResponse.data.message
+            if (message === 'This is your own number') {
+              setError("You can't start a chat with yourself")
+              setNotFound(false)
+            } else {
+              setNotFound(true)
+            }
+          }
         }
       } else {
         // Search by name
