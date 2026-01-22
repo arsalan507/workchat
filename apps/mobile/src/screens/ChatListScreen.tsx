@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, TextInput } from 'react-native'
 import { useNavigation, useFocusEffect } from '@react-navigation/native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 
@@ -28,9 +27,7 @@ interface Chat {
 
 export default function ChatListScreen() {
   const navigation = useNavigation()
-  const insets = useSafeAreaInsets()
   const user = useAuthStore((state) => state.user)
-  const logout = useAuthStore((state) => state.logout)
 
   const [chats, setChats] = useState<Chat[]>([])
   const [loading, setLoading] = useState(true)
@@ -156,15 +153,7 @@ export default function ChatListScreen() {
   )
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>WorkChat</Text>
-        <TouchableOpacity onPress={logout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
-
+    <View style={styles.container}>
       {/* Search */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInput}>
@@ -203,27 +192,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  header: {
-    backgroundColor: '#128C7E',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  logoutButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  logoutText: {
-    color: '#FFFFFF',
-    fontSize: 14,
   },
   searchContainer: {
     padding: 8,
