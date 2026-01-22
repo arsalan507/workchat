@@ -5,7 +5,6 @@ import cookie from '@fastify/cookie'
 import jwt from '@fastify/jwt'
 import multipart from '@fastify/multipart'
 import rateLimit from '@fastify/rate-limit'
-import { createServer } from 'http'
 import { Server as SocketServer } from 'socket.io'
 
 import { authRoutes } from './routes/auth'
@@ -92,15 +91,13 @@ async function buildServer() {
 async function start() {
   const fastify = await buildServer()
 
-  // Create HTTP server for Socket.io
-  const httpServer = createServer(fastify.server)
-
-  // Setup Socket.io
-  const io = new SocketServer(httpServer, {
+  // Setup Socket.io with Fastify's server
+  const io = new SocketServer(fastify.server, {
     cors: {
-      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+      origin: '*', // Allow all origins for mobile app
       credentials: true,
     },
+    transports: ['websocket', 'polling'],
   })
 
   // Attach io to fastify for use in routes
