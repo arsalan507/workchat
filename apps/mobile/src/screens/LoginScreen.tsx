@@ -65,7 +65,11 @@ export default function LoginScreen() {
       }
       setStep('otp')
     } catch (err: any) {
-      setError(err.response?.data?.error?.message || 'Failed to send OTP')
+      console.log('[Login] OTP error:', err.message, err.code)
+      const errorMsg = err.response?.data?.error?.message ||
+                       err.message ||
+                       'Failed to send OTP'
+      setError(`${errorMsg}${err.code ? ` (${err.code})` : ''}`)
     }
   }
 
