@@ -12,6 +12,7 @@ import ChatListScreen from './src/screens/ChatListScreen'
 import ChatScreen from './src/screens/ChatScreen'
 import TasksScreen from './src/screens/TasksScreen'
 import UpdatesScreen from './src/screens/UpdatesScreen'
+import NewChatScreen from './src/screens/NewChatScreen'
 import Header from './src/components/ui/Header'
 import { useAuthStore } from './src/stores/authStore'
 
@@ -123,6 +124,7 @@ function RootNavigator() {
         <>
           <Stack.Screen name="Main" component={MainTabs} />
           <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen name="NewChat" component={NewChatScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

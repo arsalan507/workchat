@@ -184,6 +184,15 @@ export default function ChatListScreen() {
           }
         />
       )}
+
+      {/* Floating Action Button - New Chat */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => (navigation as any).navigate('NewChat')}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.fabIcon}>+</Text>
+      </TouchableOpacity>
     </View>
   )
 }
@@ -285,5 +294,27 @@ const styles = StyleSheet.create({
   chatLastMessage: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#25D366',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  fabIcon: {
+    fontSize: 32,
+    color: '#FFFFFF',
+    fontWeight: '300',
+    marginTop: -2,
   },
 })
