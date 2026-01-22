@@ -7,10 +7,17 @@ const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000'
 class SocketService {
   private socket: Socket | null = null
   private listeners: Map<string, Set<(data: any) => void>> = new Map()
+  private pendingChatJoins: Set<string> = new Set()
+  private isConnecting: boolean = false
 
   async connect() {
     if (this.socket?.connected) {
       console.log('[Socket] Already connected')
+      return
+    }
+
+    if (this.isConnecting) {
+      console.log('[Socket] Connection already in progress')
       return
     }
 
@@ -20,18 +27,28 @@ class SocketService {
       return
     }
 
+    this.isConnecting = true
     console.log('[Socket] Connecting to:', API_URL)
 
     this.socket = io(API_URL, {
       auth: { token },
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'], // Start with polling, upgrade to websocket
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      timeout: 20000,
+      forceNew: true,
     })
 
     this.socket.on('connect', () => {
       console.log('[Socket] Connected:', this.socket?.id)
+      this.isConnecting = false
+
+      // Join any pending chat rooms
+      this.pendingChatJoins.forEach((chatId) => {
+        console.log('[Socket] Auto-joining pending chat:', chatId)
+        this.socket?.emit('join_chat', { chatId })
+      })
     })
 
     this.socket.on('disconnect', (reason) => {
@@ -40,6 +57,7 @@ class SocketService {
 
     this.socket.on('connect_error', (error) => {
       console.log('[Socket] Connection error:', error.message)
+      this.isConnecting = false
     })
 
     // Set up event forwarding
@@ -80,13 +98,22 @@ class SocketService {
   }
 
   joinChat(chatId: string) {
+    // Add to pending joins in case socket isn't connected yet
+    this.pendingChatJoins.add(chatId)
+
     if (this.socket?.connected) {
       console.log('[Socket] Joining chat:', chatId)
       this.socket.emit('join_chat', { chatId })
+    } else {
+      console.log('[Socket] Not connected, queued join for chat:', chatId)
+      // Try to connect if not already
+      this.connect()
     }
   }
 
   leaveChat(chatId: string) {
+    this.pendingChatJoins.delete(chatId)
+
     if (this.socket?.connected) {
       console.log('[Socket] Leaving chat:', chatId)
       this.socket.emit('leave_chat', { chatId })
