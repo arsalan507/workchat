@@ -20,6 +20,7 @@ import { socketService } from '../services/socket'
 import { useAuthStore } from '../stores/authStore'
 import { useChatStore } from '../stores/chatStore'
 import ConvertToTaskModal from '../components/chat/ConvertToTaskModal'
+import TaskDetailsModal from '../components/task/TaskDetailsModal'
 
 interface Message {
   id: string
@@ -78,6 +79,10 @@ export default function ChatScreen() {
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
   const [showMessageMenu, setShowMessageMenu] = useState(false)
   const [showConvertModal, setShowConvertModal] = useState(false)
+
+  // Task details modal state
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [showTaskModal, setShowTaskModal] = useState(false)
 
   const fetchMessages = async () => {
     try {
@@ -246,13 +251,41 @@ export default function ChatScreen() {
     setSelectedMessage(null)
   }
 
+  // Get current user's role in the chat
+  const getCurrentMemberRole = (): 'OWNER' | 'ADMIN' | 'MEMBER' | undefined => {
+    if (!chat?.members || !user) return undefined
+    const currentMember = chat.members.find((m: any) => m.user.id === user.id)
+    return currentMember?.role
+  }
+
+  // Handle task tap to open details modal
+  const handleTaskPress = (msg: Message) => {
+    if (msg.isTask && msg.task?.id) {
+      setSelectedTaskId(msg.task.id)
+      setShowTaskModal(true)
+    }
+  }
+
+  // Close task details modal
+  const closeTaskModal = () => {
+    setShowTaskModal(false)
+    setSelectedTaskId(null)
+  }
+
+  // Handle task update from modal
+  const handleTaskUpdated = () => {
+    fetchMessages() // Refresh messages to show updated task status
+  }
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isOwn = item.senderId === user?.id
     const canShowMenu = !item.isTask && canConvertToTask()
+    const isTask = item.isTask && item.task
 
     return (
       <TouchableOpacity
         activeOpacity={0.8}
+        onPress={() => isTask && handleTaskPress(item)}
         onLongPress={() => canShowMenu && handleMessageLongPress(item)}
         delayLongPress={500}
         style={[styles.messageContainer, isOwn ? styles.messageOwn : styles.messageOther]}
@@ -261,7 +294,7 @@ export default function ChatScreen() {
           style={[
             styles.messageBubble,
             isOwn ? styles.bubbleOwn : styles.bubbleOther,
-            item.isTask && { borderLeftWidth: 4, borderLeftColor: TASK_STATUS_COLORS[item.task?.status || 'PENDING'] },
+            isTask && { borderLeftWidth: 4, borderLeftColor: TASK_STATUS_COLORS[item.task?.status || 'PENDING'] },
           ]}
         >
           {/* Sender name for group chats */}
@@ -288,10 +321,11 @@ export default function ChatScreen() {
           )}
 
           {/* Task indicator */}
-          {item.isTask && item.task && (
+          {isTask && (
             <View style={styles.taskIndicator}>
-              <View style={[styles.taskDot, { backgroundColor: TASK_STATUS_COLORS[item.task.status] }]} />
-              <Text style={styles.taskStatus}>{item.task.status.replace('_', ' ')}</Text>
+              <View style={[styles.taskDot, { backgroundColor: TASK_STATUS_COLORS[item.task!.status] }]} />
+              <Text style={styles.taskStatus}>{item.task!.status.replace('_', ' ')}</Text>
+              <Text style={styles.taskTapHint}> - Tap to view</Text>
             </View>
           )}
 
@@ -419,6 +453,18 @@ export default function ChatScreen() {
         members={chat?.members || []}
         onSuccess={handleTaskConversionSuccess}
       />
+
+      {/* Task Details Modal */}
+      {selectedTaskId && (
+        <TaskDetailsModal
+          visible={showTaskModal}
+          onClose={closeTaskModal}
+          taskId={selectedTaskId}
+          chatId={chatId}
+          memberRole={getCurrentMemberRole()}
+          onTaskUpdated={handleTaskUpdated}
+        />
+      )}
     </KeyboardAvoidingView>
   )
 }
@@ -584,6 +630,11 @@ const styles = StyleSheet.create({
   taskStatus: {
     fontSize: 11,
     color: '#6B7280',
+  },
+  taskTapHint: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
   },
   inputContainer: {
     flexDirection: 'row',

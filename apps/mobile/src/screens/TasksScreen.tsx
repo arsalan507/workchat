@@ -11,6 +11,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { api } from '../services/api'
+import TaskDetailsModal from '../components/task/TaskDetailsModal'
 
 interface Task {
   id: string
@@ -23,6 +24,9 @@ interface Task {
     name: string
   }
   createdAt: string
+  message?: {
+    chatId: string
+  }
 }
 
 const TASK_STATUS_COLORS: Record<string, string> = {
@@ -46,6 +50,8 @@ export default function TasksScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL')
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [showTaskModal, setShowTaskModal] = useState(false)
 
   const fetchTasks = async () => {
     try {
@@ -84,8 +90,18 @@ export default function TasksScreen() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
+  const openTaskDetails = (task: Task) => {
+    setSelectedTask(task)
+    setShowTaskModal(true)
+  }
+
+  const closeTaskModal = () => {
+    setShowTaskModal(false)
+    setSelectedTask(null)
+  }
+
   const renderTask = ({ item }: { item: Task }) => (
-    <TouchableOpacity style={styles.taskItem}>
+    <TouchableOpacity style={styles.taskItem} onPress={() => openTaskDetails(item)}>
       <View style={styles.taskHeader}>
         <View style={[styles.statusDot, { backgroundColor: TASK_STATUS_COLORS[item.status] }]} />
         <Text style={styles.taskTitle} numberOfLines={2}>
@@ -107,6 +123,7 @@ export default function TasksScreen() {
         <Text style={[styles.taskStatus, { color: TASK_STATUS_COLORS[item.status] }]}>
           {item.status.replace('_', ' ')}
         </Text>
+        <Text style={styles.tapHint}>Tap to view details</Text>
       </View>
     </TouchableOpacity>
   )
@@ -152,6 +169,17 @@ export default function TasksScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#128C7E" />
           }
+        />
+      )}
+
+      {/* Task Details Modal */}
+      {selectedTask && (
+        <TaskDetailsModal
+          visible={showTaskModal}
+          onClose={closeTaskModal}
+          taskId={selectedTask.id}
+          chatId={selectedTask.message?.chatId || ''}
+          onTaskUpdated={fetchTasks}
         />
       )}
     </View>
@@ -273,9 +301,16 @@ const styles = StyleSheet.create({
   },
   taskFooter: {
     paddingLeft: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   taskStatus: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  tapHint: {
+    fontSize: 11,
+    color: '#9CA3AF',
   },
 })
