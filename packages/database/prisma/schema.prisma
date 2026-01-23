@@ -135,16 +135,35 @@ model Message {
   updatedAt DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  chat    Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  sender  User      @relation(fields: [senderId], references: [id])
-  replyTo Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
-  replies Message[] @relation("MessageReplies")
-  task    Task?
+  chat      Chat          @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    User          @relation(fields: [senderId], references: [id])
+  replyTo   Message?      @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies   Message[]     @relation("MessageReplies")
+  task      Task?
+  readBy    MessageRead[]
 
   @@index([chatId, createdAt(sort: Desc)])
   @@index([senderId])
   @@index([isTask])
   @@map("messages")
+}
+
+// ============================================
+// MESSAGE READ TRACKING
+// ============================================
+
+model MessageRead {
+  id        String   @id @default(cuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  readAt    DateTime @default(now()) @map("read_at")
+
+  // Relations
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, readAt])
+  @@map("message_reads")
 }
 
 // ============================================

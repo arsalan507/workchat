@@ -105,12 +105,24 @@ export default function ChatScreen() {
     }
   }
 
+  // Mark all messages in this chat as read
+  const markChatAsRead = async () => {
+    try {
+      await api.post(`/api/chats/${chatId}/mark-read`)
+    } catch (error) {
+      console.error('Failed to mark chat as read:', error)
+    }
+  }
+
   useEffect(() => {
     // Track current chat for notification suppression
     setCurrentChatId(chatId)
 
     fetchChat()
     fetchMessages()
+
+    // Mark messages as read when entering the chat
+    markChatAsRead()
 
     // Join the chat room for real-time updates
     socketService.joinChat(chatId)
@@ -128,6 +140,8 @@ export default function ChatScreen() {
           if (exists) return prev
           return [...prev, data.message]
         })
+        // Mark as read since user is viewing the chat
+        markChatAsRead()
       }
     })
 
@@ -158,6 +172,8 @@ export default function ChatScreen() {
       fetchMessages()
       // Rejoin chat room when screen comes into focus
       socketService.joinChat(chatId)
+      // Mark messages as read when returning to chat
+      markChatAsRead()
     }, [chatId])
   )
 

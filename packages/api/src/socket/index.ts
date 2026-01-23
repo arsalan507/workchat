@@ -164,7 +164,7 @@ export function setupSocketHandlers(io: SocketServer, fastify: FastifyInstance) 
       }
     })
 
-    // Handle marking message as read
+    // Handle marking message as read (single message)
     socket.on('mark_read', async ({
       chatId,
       messageId,
@@ -172,13 +172,73 @@ export function setupSocketHandlers(io: SocketServer, fastify: FastifyInstance) 
       chatId: string
       messageId: string
     }) => {
-      // Broadcast read receipt to chat
-      socket.to(`chat:${chatId}`).emit('message_read', {
-        chatId,
-        messageId,
-        userId: user.id,
-        readAt: new Date().toISOString(),
-      })
+      try {
+        // Persist the read receipt to database
+        await prisma.messageRead.upsert({
+          where: {
+            messageId_userId: { messageId, userId: user.id },
+          },
+          create: {
+            messageId,
+            userId: user.id,
+          },
+          update: {},
+        })
+
+        // Broadcast read receipt to chat
+        socket.to(`chat:${chatId}`).emit('message_read', {
+          chatId,
+          messageId,
+          userId: user.id,
+          readAt: new Date().toISOString(),
+        })
+      } catch (error) {
+        console.error('Error marking message as read:', error)
+      }
+    })
+
+    // Handle marking all messages in a chat as read
+    socket.on('mark_chat_read', async ({ chatId }: { chatId: string }) => {
+      try {
+        // Get all unread messages in this chat (not sent by current user)
+        const unreadMessages = await prisma.message.findMany({
+          where: {
+            chatId,
+            senderId: { not: user.id },
+            readBy: {
+              none: { userId: user.id },
+            },
+          },
+          select: { id: true },
+        })
+
+        if (unreadMessages.length > 0) {
+          // Create read receipts for all unread messages
+          await prisma.messageRead.createMany({
+            data: unreadMessages.map((m) => ({
+              messageId: m.id,
+              userId: user.id,
+            })),
+            skipDuplicates: true,
+          })
+
+          // Emit event to update other users (and chat list unread count)
+          socket.to(`chat:${chatId}`).emit('messages_read', {
+            chatId,
+            userId: user.id,
+            count: unreadMessages.length,
+            readAt: new Date().toISOString(),
+          })
+
+          // Emit to self to update unread count in chat list
+          socket.emit('unread_updated', {
+            chatId,
+            unreadCount: 0,
+          })
+        }
+      } catch (error) {
+        console.error('Error marking chat as read:', error)
+      }
     })
 
     // Handle disconnect

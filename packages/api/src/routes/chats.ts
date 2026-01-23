@@ -69,6 +69,25 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
       orderBy: { updatedAt: 'desc' },
     })
 
+    // Get unread counts for all chats in one query
+    const chatIds = chats.map((c) => c.id)
+    const unreadCounts = await prisma.$queryRaw<{ chat_id: string; count: bigint }[]>`
+      SELECT m.chat_id, COUNT(m.id)::bigint as count
+      FROM messages m
+      WHERE m.chat_id = ANY(${chatIds})
+        AND m.sender_id != ${userId}
+        AND NOT EXISTS (
+          SELECT 1 FROM message_reads mr
+          WHERE mr.message_id = m.id AND mr.user_id = ${userId}
+        )
+      GROUP BY m.chat_id
+    `
+
+    // Create a map of chat_id -> unread count
+    const unreadMap = new Map(
+      unreadCounts.map((r) => [r.chat_id, Number(r.count)])
+    )
+
     // Transform to include lastMessage and unreadCount
     const transformedChats = chats.map((chat) => {
       const lastMessage = chat.messages[0] || null
@@ -94,7 +113,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
               createdAt: lastMessage.createdAt,
             }
           : null,
-        unreadCount: 0, // TODO: Implement unread tracking
+        unreadCount: unreadMap.get(chat.id) || 0,
       }
     })
 
@@ -619,6 +638,56 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       success: true,
       data: { message: 'Left chat successfully' },
+    }
+  })
+
+  /**
+   * POST /api/chats/:id/mark-read - Mark all messages in chat as read
+   */
+  fastify.post('/:id/mark-read', {
+    preHandler: [authenticate, requireChatMember('id')],
+  }, async (request) => {
+    const { id } = chatIdParamsSchema.parse(request.params)
+    const userId = request.user.id
+
+    // Get all unread messages in this chat (not sent by current user)
+    const unreadMessages = await prisma.message.findMany({
+      where: {
+        chatId: id,
+        senderId: { not: userId },
+        readBy: {
+          none: { userId },
+        },
+      },
+      select: { id: true },
+    })
+
+    if (unreadMessages.length === 0) {
+      return {
+        success: true,
+        data: { markedCount: 0 },
+      }
+    }
+
+    // Create read receipts for all unread messages
+    await prisma.messageRead.createMany({
+      data: unreadMessages.map((m) => ({
+        messageId: m.id,
+        userId,
+      })),
+      skipDuplicates: true,
+    })
+
+    // Emit socket event to notify other users that messages were read
+    fastify.io.to(`chat:${id}`).emit('messages_read', {
+      chatId: id,
+      userId,
+      readAt: new Date().toISOString(),
+    })
+
+    return {
+      success: true,
+      data: { markedCount: unreadMessages.length },
     }
   })
 

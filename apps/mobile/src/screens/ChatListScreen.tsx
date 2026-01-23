@@ -24,6 +24,7 @@ interface Chat {
   }>
   updatedAt?: string
   createdAt?: string
+  unreadCount?: number
 }
 
 export default function ChatListScreen() {
@@ -67,9 +68,26 @@ export default function ChatListScreen() {
       fetchChats()
     })
 
+    // Listen for unread count updates
+    const unsubscribeUnreadUpdated = socketService.on('unread_updated', (data: { chatId: string; unreadCount: number }) => {
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === data.chatId ? { ...chat, unreadCount: data.unreadCount } : chat
+        )
+      )
+    })
+
+    // Listen for messages_read events (when someone else reads messages)
+    const unsubscribeMessagesRead = socketService.on('messages_read', () => {
+      // Refresh to get updated unread counts
+      fetchChats()
+    })
+
     return () => {
       unsubscribeNewMessage()
       unsubscribeChatCreated()
+      unsubscribeUnreadUpdated()
+      unsubscribeMessagesRead()
     }
   }, [])
 
@@ -138,29 +156,42 @@ export default function ChatListScreen() {
     return displayName.toLowerCase().includes(searchQuery.toLowerCase())
   })
 
-  const renderChat = ({ item }: { item: Chat }) => (
-    <TouchableOpacity
-      style={styles.chatItem}
-      onPress={() => (navigation as any).navigate('Chat', { chatId: item.id, chatName: getChatDisplayName(item) })}
-    >
-      <View style={[styles.avatar, item.type === 'GROUP' && styles.groupAvatar]}>
-        <Text style={styles.avatarText}>{getChatDisplayName(item).charAt(0).toUpperCase()}</Text>
-      </View>
-      <View style={styles.chatContent}>
-        <View style={styles.chatHeader}>
-          <Text style={styles.chatName} numberOfLines={1}>
-            {getChatDisplayName(item)}
-          </Text>
-          <Text style={styles.chatTime}>
-            {item.lastMessage?.createdAt ? formatTime(item.lastMessage.createdAt) : (item.updatedAt ? formatTime(item.updatedAt) : '')}
-          </Text>
+  const renderChat = ({ item }: { item: Chat }) => {
+    const hasUnread = (item.unreadCount || 0) > 0
+
+    return (
+      <TouchableOpacity
+        style={styles.chatItem}
+        onPress={() => (navigation as any).navigate('Chat', { chatId: item.id, chatName: getChatDisplayName(item) })}
+      >
+        <View style={[styles.avatar, item.type === 'GROUP' && styles.groupAvatar]}>
+          <Text style={styles.avatarText}>{getChatDisplayName(item).charAt(0).toUpperCase()}</Text>
         </View>
-        <Text style={styles.chatLastMessage} numberOfLines={1}>
-          {getLastMessagePreview(item)}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  )
+        <View style={styles.chatContent}>
+          <View style={styles.chatHeader}>
+            <Text style={[styles.chatName, hasUnread && styles.chatNameUnread]} numberOfLines={1}>
+              {getChatDisplayName(item)}
+            </Text>
+            <Text style={[styles.chatTime, hasUnread && styles.chatTimeUnread]}>
+              {item.lastMessage?.createdAt ? formatTime(item.lastMessage.createdAt) : (item.updatedAt ? formatTime(item.updatedAt) : '')}
+            </Text>
+          </View>
+          <View style={styles.chatFooter}>
+            <Text style={[styles.chatLastMessage, hasUnread && styles.chatLastMessageUnread]} numberOfLines={1}>
+              {getLastMessagePreview(item)}
+            </Text>
+            {hasUnread && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadBadgeText}>
+                  {item.unreadCount! > 99 ? '99+' : item.unreadCount}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </TouchableOpacity>
+    )
+  }
 
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
@@ -308,9 +339,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
   },
+  chatTimeUnread: {
+    color: '#25D366',
+  },
+  chatFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   chatLastMessage: {
     fontSize: 14,
     color: '#6B7280',
+    flex: 1,
+  },
+  chatLastMessageUnread: {
+    color: '#111827',
+    fontWeight: '500',
+  },
+  chatNameUnread: {
+    fontWeight: '700',
+  },
+  unreadBadge: {
+    backgroundColor: '#25D366',
+    borderRadius: 12,
+    minWidth: 22,
+    height: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    marginLeft: 8,
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   fab: {
     position: 'absolute',
